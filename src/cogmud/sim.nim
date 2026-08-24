@@ -285,12 +285,15 @@ proc salienceOf*(event: GameEvent): int =
     elif event.reason == oRobberyFailed or event.reason == oNothingToTake: 80
     else: 5
   of iGive:
+    ## Only the Guildhall can produce an `ok` handover to a shop: resolveGiveNpc
+    ## reports oNoMatchingCommission for every other keeper (the goods still
+    ## change hands), so an `ok` with an npc is always a commission delivery and
+    ## an `ok` without one is a gift between cogs.
     if event.reason != oOk: 5
-    elif event.npc == GuildNpc:
+    elif event.npc >= 0:
       ## `coin` on a delivery carries the points this delivery banked, so a
       ## completion (which adds the bonus) is visible from the event alone.
       if event.coin > PointsPerUnit * max(event.qty, 1): 90 else: 60
-    elif event.npc >= 0: 25
     else: 35
   of iAccept:
     if event.reason != oOk: 5

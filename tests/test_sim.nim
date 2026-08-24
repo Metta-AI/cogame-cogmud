@@ -357,6 +357,11 @@ suite "commissions and partial credit":
     check sim.lastAct(1).reason == oNoMatchingCommission
     check sim.cogs[1].items[item] == 0
     check sim.questPoints(1) == 0
+    ## Neither is a delivery, so neither is a highlight: a handover that banks
+    ## no commission scores the failed-act 5, and no salience branch anywhere
+    ## can be reached by a non-Guild keeper.
+    check sim.lastAct(0).salience == 5
+    check sim.lastAct(1).salience == 5
 
 # 8 -------------------------------------------------------------------------
 suite "contention resolves by initiative":
