@@ -322,6 +322,10 @@ suite "restock":
         if expected[item] < StockCap:
           expected[item] += 1
       for item in 0 ..< ItemKinds:
+        ## The exact gain, not merely a bound: each trade-list item gained
+        ## 12 div trade.len restocks plus the round-robin remainder, capped.
+        checkpoint("npc " & $npc & " item " & $item)
+        check sim.npcs[npc].stock[item] == expected[item]
         check sim.npcs[npc].stock[item] <= StockCap
         if item in trade:
           check sim.npcs[npc].stock[item] >= opening[npc][item]
