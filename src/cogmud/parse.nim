@@ -7,13 +7,23 @@
 ## exists, the item is present, the coin is sufficient) belongs to the
 ## resolution step in `sim.nim`, which is where the outcome reason is recorded.
 ##
-## Three deliberate additions to the design note's verb table, each needed by a
-## paraphrase the note's own test list requires and each documented in
-## `sentences.md`:
+## Deliberate additions to the design note's verb table, each needed by a
+## paraphrase the note's own test list or its phrasebook requires, and each
+## documented in the shipped `sentences.md`:
 ##   * `off` joins the movement verbs under the same room-slot guard as `slip`
 ##     ("Off to the harbour with me.");
+##   * `wander` joins them unguarded — it is what a rambling cog says, and it
+##     is the verb the `magpie` baseline writes on every ramble turn
+##     ("I wander over to the Docks.");
 ##   * `have` / `has` join the giving verbs under a target-slot guard
 ##     ("Vell can have these hides.");
+##   * `picks` and `asks` join `pick` and `ask`, because the third person is a
+##     shape LLM replies write as readily as the first;
+##   * `put` and `read` are unguarded rather than the note's "(down)" and
+##     "(the board)": "I put the relic here." and "I read the notices." are the
+##     same acts, and the following word is not load-bearing;
+##   * `bargain` / `proposal` join the offer words `offer` / `deal` / `terms`,
+##     so "I take his bargain." accepts;
 ##   * a sentence with no verb at all that names both a shopkeeper and a good is
 ##     read as a purchase ("Two hides, tanner, and be quick."). Every other
 ##     verbless sentence is still `no_verb`.

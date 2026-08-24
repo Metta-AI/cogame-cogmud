@@ -33,7 +33,7 @@ is a MOVE.
 | sell | sell, sells, offload, unload, flog |
 | hand over | give, gives, hand, hands, deliver, delivers, turn (in/over), present, donate, pay (with a cog named), have/has (with a target named) |
 | offer | offer, offers, propose, trade, swap, barter |
-| accept | accept, accepts, agree, take (with "offer"/"deal"/"terms" in the sentence), deal, shake |
+| accept | accept, accepts, agree, take (with "offer"/"deal"/"bargain"/"terms"/"proposal" in the sentence), deal, shake |
 | hire | hire, hires, employ, retain, engage |
 | rob | rob, robs, steal, stealing, mug, jump, ambush, waylay, lift (with a cog named), pick (... pocket), cut (... purse) |
 | speak | say, says, tell, tells, shout, call, announce, whisper, ask (with no shopkeeper named) |
