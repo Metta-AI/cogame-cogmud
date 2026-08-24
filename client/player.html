@@ -60,22 +60,24 @@
 <!-- =====================================================================
      COGMUD additions to the inherited cogame-bullwhip chrome.
      Nothing above this banner is removed or rewritten: every element the
-     starter ships keeps its id (#layout, #stage, #topband, #wordmark, #clock,
-     #topright, #statuschip, #feedtoggle, #scorebug, #board-wrap, canvas#table,
-     #lightpool, #grain, #endscreen, #transport, .scrub#scrub, .tbar,
-     .tbtn#play, .tpos#pos, #feed, #loading) and the fit() + bindFeedToggle
-     bootstrap is the starter's. Two elements are APPENDED - #townbar between
-     #scorebug and #board-wrap, and .treel#reel as a third row inside
-     #transport - and the block below measures the transport band into
-     --band/--hudscale on :root. No zoom bar and no minimap panel: bullwhip
-     ships neither, and the parchment map is a fixed arena that is always
-     wholly in frame at every width.
+     starter's LIVE page ships keeps its id (#layout, #stage, #topband,
+     #wordmark, #clock, #topright, #statuschip, #feedtoggle, #scorebug,
+     #board-wrap, canvas#table, #lightpool, #grain, #endscreen, #feed) and the
+     fit() + bindFeedToggle bootstrap is the starter's. ONE element is APPENDED
+     - #townbar, between #scorebug and #board-wrap. A live page has no
+     transport: the starter ships the scrubber, the play button and the
+     highlight reel on the REPLAY page only (client/replay.html and
+     replay-viewer/index.html), so relayout() below measures no band and sets
+     --band to 0px here, which is the right value for a page with nothing
+     under the stage. No zoom bar and no minimap panel: bullwhip ships neither,
+     and the parchment map is a fixed arena that is always wholly in frame at
+     every width.
      ===================================================================== -->
 <script>
   // relayout(): --band and --hudscale live on :root (document.documentElement)
-  // so every rule can see them. --band is #transport's measured height, which
-  // therefore INCLUDES the highlight-reel row, since the reel is a child of
-  // #transport. fit() is called from here too, so the canvas and the custom
+  // so every rule can see them. --band is #transport's measured height; this
+  // page has no #transport, so it measures 0 and the stage runs to the bottom
+  // of the window. fit() is called from here too, so the canvas and the custom
   // properties can never disagree.
   function relayout() {
     var root = document.documentElement;
