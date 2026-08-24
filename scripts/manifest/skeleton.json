@@ -1,0 +1,485 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "episode_timeout_minutes": 20,
+  "tags": [
+    "mud",
+    "natural-language",
+    "emergent-economy",
+    "open-ended",
+    "mixed-motive",
+    "llm-driven",
+    "turn-based",
+    "six-player",
+    "trading"
+  ],
+  "game": {
+    "name": "cogmud",
+    "replay_viewer": {
+      "bundle": "static-replay-viewer"
+    },
+    "description": "PLACEHOLDER",
+    "owner": "daveey@gmail.com",
+    "runnable": {
+      "type": "game",
+      "image": "{{COGMUD_IMAGE}}",
+      "run": [
+        "/bin/cogmud"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/cogmud/anthropic_api_key"
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogmud/tree/main"
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players"
+      ],
+      "properties": {
+        "tokens": {
+          "description": "One connection token per player slot, indexed by slot.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "description": "One player display-name object per seat, indexed by slot.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "num_agents": {
+          "description": "Seat count; injected by the commissioner. Cogmud is a six-player game and every seat is symmetric.",
+          "type": "integer",
+          "minimum": 6,
+          "maximum": 6
+        },
+        "seed": {
+          "description": "Pins the six starting rooms, the two private commissions per seat, the six ground items and the seat aliases. Omit for a fresh random seed per episode.",
+          "type": "integer"
+        },
+        "turns": {
+          "description": "Turns in the episode. All six seats write one sentence every turn, simultaneously, and the turn resolves when the sixth lands.",
+          "type": "integer",
+          "minimum": 6,
+          "maximum": 40,
+          "default": 14
+        },
+        "speech": {
+          "description": "Whether a seat may speak one line aloud into its room each turn (non-binding free text, read by everyone there next turn).",
+          "type": "boolean",
+          "default": true
+        },
+        "thievery": {
+          "description": "Whether robbery can succeed at all. False is the honest-town variant: the watch is everywhere and every robbery reports thievery_forbidden.",
+          "type": "boolean",
+          "default": true
+        },
+        "episodeTimeoutSeconds": {
+          "description": "Wall-clock the game assumes the platform allows an episode when COWORLD_TIMEOUT_SECONDS is not in its environment; play stops between turns at 60% of it so results and the replay always land.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 6000,
+          "default": 1200
+        },
+        "turnDelayMs": {
+          "description": "Spectator pacing delay between turns, capped across the episode by a 20 s pacing budget.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 400
+        },
+        "model": {
+          "description": "Claude model for the direct-Anthropic transport (ANTHROPIC_API_KEY). Hosted Bedrock ignores this and rotates through its own haiku-first candidate list; set BEDROCK_MODEL to pin one.",
+          "type": "string",
+          "default": "claude-sonnet-5"
+        },
+        "maxOutputTokens": {
+          "description": "Reply budget per seat per turn. 900, not 400: a smaller budget cuts replies off at max_tokens before any JSON.",
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 2000,
+          "default": 900
+        },
+        "llmTimeoutSeconds": {
+          "description": "Wall clock for one batch of six. The single retry batch gets half of it, floored at 8 s, so a turn costs at most llmTimeoutSeconds + max(8, llmTimeoutSeconds div 2).",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 24
+        },
+        "shutdownGraceSeconds": {
+          "description": "How long /healthz and /global keep answering after the artifacts are written. Hosted certification pings the /global socket after the player pods start, and a fast scripted episode would otherwise already have exited.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120,
+          "default": 20
+        },
+        "player_connect_timeout_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "default": 180
+        }
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "scores",
+        "coin",
+        "wealth",
+        "questPoints",
+        "delivered",
+        "robberies",
+        "robbed",
+        "turns",
+        "maxTurns",
+        "reason"
+      ],
+      "properties": {
+        "names": {
+          "description": "Policy display names, indexed by slot. Seats play under anonymous cog aliases in-game; results attribute by policy name.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "string"
+          }
+        },
+        "scores": {
+          "description": "(wealth + 3 x questPoints - 40) / 40 for the seat. Higher is better; a seat that does nothing scores exactly 0.0 and a seat robbed blind scores negative.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "number"
+          }
+        },
+        "coin": {
+          "description": "Coins in the seat's purse at the end.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "wealth": {
+          "description": "Coin plus the fixed reference value of everything in the seat's pack.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "questPoints": {
+          "description": "Commission points banked: 4 per unit delivered plus 8 per commission finished.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "delivered": {
+          "description": "Units handed to Guildmaster Vell against an open commission.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "robberies": {
+          "description": "Successful thefts the seat committed.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "robbed": {
+          "description": "Times the seat was successfully robbed.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "turns": {
+          "description": "Turns actually resolved.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxTurns": {
+          "description": "The episode's turn count after budget fitting.",
+          "type": "integer",
+          "minimum": 6
+        },
+        "reason": {
+          "description": "How the episode ended: complete (all turns resolved) or deadline (the episode clock stopped it between turns; scores use the state as it stands).",
+          "type": "string"
+        }
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "PLACEHOLDER"
+      },
+      "global": {
+        "type": "text",
+        "value": "PLACEHOLDER"
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "PLACEHOLDER"
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "rules.md",
+          "content": {
+            "type": "text",
+            "value": "PLACEHOLDER"
+          }
+        },
+        {
+          "id": "sentences.md",
+          "title": "sentences.md",
+          "content": {
+            "type": "text",
+            "value": "PLACEHOLDER"
+          }
+        },
+        {
+          "id": "scoring.md",
+          "title": "scoring.md",
+          "content": {
+            "type": "text",
+            "value": "PLACEHOLDER"
+          }
+        }
+      ]
+    }
+  },
+  "player": [
+    {
+      "id": "cogmud-player",
+      "name": "Cogmud Prompt Player",
+      "type": "player",
+      "description": "The reference Cogmud policy: delivers its PLAYER_PROMPT (or a default commission-first strategy in words) to the game and spectates until the final frame. The game server sends that prompt plus the seat's whole observation to Claude every turn and plays back the one sentence it answers with. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "image": "{{COGMUD_IMAGE}}",
+      "run": [
+        "/bin/cogmud-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogmud/tree/main"
+    },
+    {
+      "id": "cogmud-factor",
+      "name": "Cogmud Factor Baseline",
+      "type": "player",
+      "description": "The scripted quest-and-trade baseline as a fieldable policy: hands Vell what a commission still needs, buys what it is short of where it is stocked, sells surplus into a shop that is paying over the odds, picks up anything valuable, and otherwise walks the shortest path toward the next thing it needs. Never robs, never hires, never speaks. This is also the universal fallback for any failed LLM decision, so an episode always completes.",
+      "image": "{{COGMUD_IMAGE}}",
+      "run": [
+        "/bin/cogmud-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "factor"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogmud/tree/main"
+    },
+    {
+      "id": "cogmud-magpie",
+      "name": "Cogmud Magpie Baseline",
+      "type": "player",
+      "description": "The scripted thief-peddler: ignores commissions entirely, jumps anyone carrying goods in an unlit room, hawks whatever is in its pack at a markup every third turn, works the spread when a shop is mispricing, and walks toward the dark when its hands are empty. Deliberately worse than factor and differently shaped, so a two-baseline table is not a mirror match - and its thieving means every offline episode exercises the robbery path.",
+      "image": "{{COGMUD_IMAGE}}",
+      "run": [
+        "/bin/cogmud-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "magpie"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogmud/tree/main"
+    }
+  ],
+  "variants": [
+    {
+      "id": "standard",
+      "name": "Market week",
+      "description": "Six cogs, nine rooms, fourteen turns; shopkeepers restock slowly, commissions pay per unit, and the Docks and Cutpurse Alley are unlit.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          },
+          {
+            "name": "Player5"
+          },
+          {
+            "name": "Player6"
+          }
+        ],
+        "num_agents": 6,
+        "turns": 14,
+        "speech": true,
+        "thievery": true,
+        "turnDelayMs": 400,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "honest-town",
+      "name": "Honest town",
+      "description": "The same town with the watch everywhere: robbery never succeeds, so every coin has to be traded or earned.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          },
+          {
+            "name": "Player5"
+          },
+          {
+            "name": "Player6"
+          }
+        ],
+        "num_agents": 6,
+        "turns": 14,
+        "speech": true,
+        "thievery": false,
+        "turnDelayMs": 400,
+        "player_connect_timeout_seconds": 180
+      }
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Sprocket"
+        },
+        {
+          "name": "Gizmo"
+        },
+        {
+          "name": "Ratchet"
+        },
+        {
+          "name": "Widget"
+        },
+        {
+          "name": "Bolt"
+        },
+        {
+          "name": "Piston"
+        }
+      ],
+      "num_agents": 6,
+      "seed": 11,
+      "turns": 8,
+      "turnDelayMs": 0,
+      "player_connect_timeout_seconds": 180
+    },
+    "players": [
+      {
+        "player_id": "cogmud-player"
+      },
+      {
+        "player_id": "cogmud-factor"
+      },
+      {
+        "player_id": "cogmud-player"
+      },
+      {
+        "player_id": "cogmud-magpie"
+      },
+      {
+        "player_id": "cogmud-factor"
+      },
+      {
+        "player_id": "cogmud-player"
+      }
+    ]
+  }
+}

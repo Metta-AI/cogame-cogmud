@@ -1,0 +1,485 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "episode_timeout_minutes": 20,
+  "tags": [
+    "mud",
+    "natural-language",
+    "emergent-economy",
+    "open-ended",
+    "mixed-motive",
+    "llm-driven",
+    "turn-based",
+    "six-player",
+    "trading"
+  ],
+  "game": {
+    "name": "cogmud",
+    "replay_viewer": {
+      "bundle": "static-replay-viewer"
+    },
+    "description": "Cogmud: six LLM-piloted cogs loose in the nine-room town of Coppermarch for fourteen turns, where every move is ONE SENTENCE of plain English. There is no action menu anywhere in the stack: a seat's whole output is a sentence, which the server parses with a bounded intent grammar into exactly one of thirteen intents - go, take, drop, buy, sell, hand over, offer, accept, hire, rob, ask, speak, wait. Five shopkeepers hold stock whose prices move with it (a keeper charges more for what it is short of and pays about two thirds of what it charges), Guildmaster Vell at the Guildhall posts and settles two private commissions per seat that pay PARTIAL CREDIT per unit delivered, robbery works only in the two unlit rooms - The Docks and Cutpurse Alley - and only against a cog without a bodyguard, and hiring is the one promise the rules actually enforce: the coins move on acceptance and for three turns the hireling cannot rob its employer and guards it while they share a room. What a cog SAYS is enforced by nothing. Decisions inside a turn are simultaneous and resolve in a fixed class order - speech, shops, ground, cog to cog, robbery, movement - each class in a deterministic initiative rotation, so contention for the last unit of stock or the last item on the floor always goes to the earlier initiative. Information is strictly local: a seat sees its own purse, pack and commission book, the room it stands in with every referent named, and what was said and done there last turn - never another room, never another seat's coin or goods, never a price it is not standing next to. Score is coins plus the fixed reference value of everything carried plus 3 per commission point, so a seat that does nothing scores exactly 0.0 and a seat robbed blind scores negative. The game is LLM-driven: every turn the server sends each seat's policy prompt plus its whole observation to Claude in ONE parallel batch of six, so A POLICY IS JUST A PROMPT - build one by reusing the published cogmud-player runnable and setting PLAYER_PROMPT to your strategy. Two scripted baselines (factor, a competent quest-and-trade agent, and magpie, a thief-peddler) play any seat that registers as scripted - and every seat when no LLM credentials are available, so episodes always complete.",
+    "owner": "daveey@gmail.com",
+    "runnable": {
+      "type": "game",
+      "image": "{{COGMUD_IMAGE}}",
+      "run": [
+        "/bin/cogmud"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/cogmud/anthropic_api_key"
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogmud/tree/main"
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players"
+      ],
+      "properties": {
+        "tokens": {
+          "description": "One connection token per player slot, indexed by slot.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "description": "One player display-name object per seat, indexed by slot.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "num_agents": {
+          "description": "Seat count; injected by the commissioner. Cogmud is a six-player game and every seat is symmetric.",
+          "type": "integer",
+          "minimum": 6,
+          "maximum": 6
+        },
+        "seed": {
+          "description": "Pins the six starting rooms, the two private commissions per seat, the six ground items and the seat aliases. Omit for a fresh random seed per episode.",
+          "type": "integer"
+        },
+        "turns": {
+          "description": "Turns in the episode. All six seats write one sentence every turn, simultaneously, and the turn resolves when the sixth lands.",
+          "type": "integer",
+          "minimum": 6,
+          "maximum": 40,
+          "default": 14
+        },
+        "speech": {
+          "description": "Whether a seat may speak one line aloud into its room each turn (non-binding free text, read by everyone there next turn).",
+          "type": "boolean",
+          "default": true
+        },
+        "thievery": {
+          "description": "Whether robbery can succeed at all. False is the honest-town variant: the watch is everywhere and every robbery reports thievery_forbidden.",
+          "type": "boolean",
+          "default": true
+        },
+        "episodeTimeoutSeconds": {
+          "description": "Wall-clock the game assumes the platform allows an episode when COWORLD_TIMEOUT_SECONDS is not in its environment; play stops between turns at 60% of it so results and the replay always land.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 6000,
+          "default": 1200
+        },
+        "turnDelayMs": {
+          "description": "Spectator pacing delay between turns, capped across the episode by a 20 s pacing budget.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 400
+        },
+        "model": {
+          "description": "Claude model for the direct-Anthropic transport (ANTHROPIC_API_KEY). Hosted Bedrock ignores this and rotates through its own haiku-first candidate list; set BEDROCK_MODEL to pin one.",
+          "type": "string",
+          "default": "claude-sonnet-5"
+        },
+        "maxOutputTokens": {
+          "description": "Reply budget per seat per turn. 900, not 400: a smaller budget cuts replies off at max_tokens before any JSON.",
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 2000,
+          "default": 900
+        },
+        "llmTimeoutSeconds": {
+          "description": "Wall clock for one batch of six. The single retry batch gets half of it, floored at 8 s, so a turn costs at most llmTimeoutSeconds + max(8, llmTimeoutSeconds div 2).",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 24
+        },
+        "shutdownGraceSeconds": {
+          "description": "How long /healthz and /global keep answering after the artifacts are written. Hosted certification pings the /global socket after the player pods start, and a fast scripted episode would otherwise already have exited.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120,
+          "default": 20
+        },
+        "player_connect_timeout_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "default": 180
+        }
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "scores",
+        "coin",
+        "wealth",
+        "questPoints",
+        "delivered",
+        "robberies",
+        "robbed",
+        "turns",
+        "maxTurns",
+        "reason"
+      ],
+      "properties": {
+        "names": {
+          "description": "Policy display names, indexed by slot. Seats play under anonymous cog aliases in-game; results attribute by policy name.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "string"
+          }
+        },
+        "scores": {
+          "description": "(wealth + 3 x questPoints - 40) / 40 for the seat. Higher is better; a seat that does nothing scores exactly 0.0 and a seat robbed blind scores negative.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "number"
+          }
+        },
+        "coin": {
+          "description": "Coins in the seat's purse at the end.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "wealth": {
+          "description": "Coin plus the fixed reference value of everything in the seat's pack.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "questPoints": {
+          "description": "Commission points banked: 4 per unit delivered plus 8 per commission finished.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "delivered": {
+          "description": "Units handed to Guildmaster Vell against an open commission.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "robberies": {
+          "description": "Successful thefts the seat committed.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "robbed": {
+          "description": "Times the seat was successfully robbed.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "turns": {
+          "description": "Turns actually resolved.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxTurns": {
+          "description": "The episode's turn count after budget fitting.",
+          "type": "integer",
+          "minimum": 6
+        },
+        "reason": {
+          "description": "How the episode ended: complete (all turns resolved) or deadline (the episode clock stopped it between turns; scores use the state as it stands).",
+          "type": "string"
+        }
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "cogmud.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). A Cogmud policy is a PROMPT: the player container's only job is to deliver it; the game server makes every decision by sending that prompt plus the seat's whole observation to Claude once a turn, as one parallel batch of six.\n\ngame->player frames:\n  {\"type\":\"welcome\",\"protocol\":\"cogmud.player.v1\",\"slot\":N,\"name\":\"Gizmo\",\"room\":\"The Chapel\",\"turns\":14} on connect.\n  {\"type\":\"state\",...} after every event, REDACTED to the seat's own view because information in this town is strictly local. Shape: {\"type\":\"state\",\"slot\":N,\"name\":str,\"coin\":int,\"items\":[{\"item\":str,\"count\":int,\"value\":int}],\"carried\":int,\"carryLimit\":8,\"quests\":[{\"item\":str,\"count\":int,\"delivered\":int,\"points\":int,\"outstanding\":int,\"settledBy\":\"Guildmaster Vell\",\"at\":\"The Guildhall\"}],\"room\":{\"id\":int,\"name\":str,\"desc\":str,\"dark\":bool,\"exits\":[{\"id\":int,\"name\":str}],\"ground\":[{\"item\":str,\"count\":int}],\"cogs\":[alias],\"npc\":{\"name\":str,\"coin\":int,\"goods\":[{\"item\":str,\"stock\":int,\"ask\":int,\"bid\":int}]}},\"heard\":[str],\"offers\":[{\"kind\":\"trade|hire\",\"from\":alias,\"item\":str,\"qty\":int,\"coin\":int}],\"standing\":{\"hiredTo\":str,\"hiredToTurns\":int,\"retainers\":[{\"name\":str,\"turns\":int}]},\"map\":[{\"name\":str,\"exits\":[str],\"npc\":str}],\"lastSentence\":str,\"lastOutcome\":str,\"notes\":str,\"turn\":int,\"turns\":int,\"turnsPlayed\":int,\"started\":bool,\"done\":bool,\"reason\":str}. NO other seat's coin, pack, commissions, notes or score; nothing at all happening in another room; no shopkeeper's stock or prices but the one in the room. The map is public knowledge - every room's name, exits and keeper - because it is in any MUD. Decisions are server-side, so the redaction loses nothing.\n  {\"type\":\"final\",\"done\":true,\"slot\":N,\"scores\":[6],\"names\":[6 aliases],\"wealth\":[6],\"questPoints\":[6],\"turns\":int,\"reason\":\"complete|deadline\"} at episode end, after which the player should exit.\n\nplayer->game frames:\n  {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str} - the prompt (max 4000 runes, cut on a rune boundary) IS the policy, sent right after connecting and again after welcome (a race guard). \"scripted\" selects a built-in baseline instead: \"factor\" (or \"1\"/\"true\"/\"yes\") plays the competent quest-and-trade agent, \"magpie\" (or \"thief\") the thief-peddler, \"\" means LLM-driven. The reference player reads PLAYER_PROMPT and PLAYER_SCRIPTED from its environment.\n\nThe reply the server asks Claude for, every turn, is one JSON object: {\"action\":\"one sentence of plain English\",\"say\":\"one line spoken aloud, or \\\"\\\"\",\"notes\":\"...\"}. \"action\" is REQUIRED and capped at 240 runes; \"say\" is optional, capped at 160 runes, and forced to \"\" when the speech flag is off; \"notes\" is optional and capped at 600 runes, private to the seat and fed back verbatim every turn. Unknown keys are ignored. A reply that is not a JSON object, or whose \"action\" is missing or empty, is INVALID: it is retried once in a smaller batch carrying a hint, and then falls back to the scripted baseline. A sentence that IS well-formed JSON but whose prose the grammar cannot read is NOT invalid - it resolves as a legal no-op with a recorded reason that the seat is told, verbatim, in its next observation. That is how a policy learns the grammar, and it is why no action menu is needed.\n\nA policy is just a prompt: field one by reusing the published cogmud-player runnable with PLAYER_PROMPT set to your strategy."
+      },
+      "global": {
+        "type": "text",
+        "value": "Global spectators connect a websocket to /global and receive the full snapshot as JSON after every event. Unlike the players' frames this is the SPECTATOR projection: every room, every purse and every shop's books at once, because the replay is where the audience gets to see the whole town.\n\nShape: {\"type\":\"state\",\"game\":\"cogmud\",\"world\":{\"rooms\":[{\"id\",\"name\",\"desc\",\"x\",\"y\",\"dark\",\"exits\":[int]}],\"items\":[{\"id\",\"name\",\"plural\",\"value\"}],\"npcs\":[{\"id\",\"name\",\"room\",\"trade\":[int]}]},\"seats\":[{\"seat\",\"name\",\"room\",\"coin\",\"items\":[6],\"carried\",\"questPoints\",\"delivered\":[2],\"quests\":[{\"item\",\"count\",\"delivered\"}],\"retainerOf\",\"retainerTurns\",\"robberies\",\"robbed\",\"score\",\"pending\",\"scripted\",\"sentence\",\"say\",\"notes\"} x6],\"rooms\":[{\"id\",\"items\":[6],\"cogs\":[seat],\"log\":[str]} x9],\"npcs\":[{\"id\",\"room\",\"coin\",\"stock\":[6],\"ask\":[6],\"bid\":[6]} x5],\"offers\":[{\"kind\":\"trade|hire\",\"from\",\"to\",\"item\",\"qty\",\"coin\",\"postedTurn\"}],\"chronicle\":[{\"seat\",\"sentence\",\"intent\",\"reason\",\"salience\"}],\"town\":{\"coinInPlay\",\"delivered\",\"robberies\",\"trades\"},\"turn\",\"turns\",\"turnsPlayed\",\"phase\":\"turn|done\",\"gameDone\",\"reason\",\"policyNames\":[str],\"events\":[...],\"started\",\"done\",\"connected\":[bool]}.\n\nThe events array is append-only and is the whole replay language - the viewer re-derives every frame from it plus the seed:\n  {\"kind\":\"start\"} - everything else is re-derived from the seed and the constant world.\n  {\"kind\":\"turn\",\"turn\":int,\"rooms\":[9 x [6 ground counts]],\"npcs\":[5 x {stock,coin}],\"cogs\":[6 x {room,prevRoom,coin,items,delivered,retainerOf,retainerTurns,robberies,robbed}]} - the world at the turn's open, and for the trailing one at the episode's end. These are DERIVED: a replay recomputes them from the seed plus the act events and rejects a recording that disagrees.\n  {\"kind\":\"act\",\"turn\",\"seat\",\"order\" (initiative 0..5),\"intent\" (\"move|take|drop|buy|sell|give|trade|accept|hire|rob|say|quest|wait|none\"),\"room\",\"toRoom\",\"item\",\"qty\",\"npc\",\"other\",\"coin\",\"reason\",\"salience\" (0..100),\"sentence\" (verbatim, <= 240 runes),\"say\" (<= 160 runes),\"text\" (the seat's notes),\"scripted\"} - one per seat per turn, appended IN RESOLUTION ORDER, so the log order is the class-then-initiative order the rules fix.\n  {\"kind\":\"end\",\"turn\":turns played,\"text\":\"complete|deadline\"}.\n\nThe complete outcome vocabulary on an act event: ok, waited, unparsed, no_verb, no_target, ambiguous_target, no_such_exit, no_such_item, not_carrying, carry_limit, no_npc_here, not_wanted, out_of_stock, cannot_afford, npc_broke, no_matching_commission, no_such_cog, not_in_room, self_target, no_such_offer, offer_expired, bound_by_contract, robbery_failed, nothing_to_take, thievery_forbidden, rejected.\n\nSalience drives the highlight reel, which is chosen by event salience rather than tick order: robbery succeeded 100, a commission completed by this delivery 90, robbery attempted and failed 80, hire accepted 70, trade offer accepted 65, commission partly delivered 60, a buy or sell moving >= 20 coin 45, a trade or hire offer posted 40, a gift between cogs 35, a buy or sell moving < 20 coin 25, a spoken line 20 (30 when it runs past 40 characters), asking a keeper about a commission 15, a take or drop 15, a move 10, any no-op 5.\n\nSeats play under anonymous cog aliases; the payload carries \"policyNames\" alongside, spectator-side only, and the viewer swaps the real names in wherever a name is RENDERED - including inside the chronicle's verbatim sentences - while the recorded bytes keep the alias. The browser page at /client/global renders the parchment map live; /client/replay plays a recorded episode; and the STATIC replay viewer bundle renders replays hosted by the platform at index.html?replay=<url>, re-deriving every frame in the browser from the recorded events with the same Nim sim the server played the episode with."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "Cogmud is a MUD for six LLM-piloted cogs. They share one nine-room town for fourteen turns and every action is one sentence of plain English, parsed by the server with a bounded intent grammar - there is no menu of moves anywhere in the stack, and a sentence the town cannot read costs the seat its turn and is explained back to it verbatim. Five shopkeepers deal in six goods at prices that move with their stock: a keeper charges more for what it is short of and pays about two thirds of what it charges, and each unit of a multi-unit purchase is priced from the stock at the moment it changes hands. Guildmaster Vell at the Guildhall posts and settles every commission in the town - two private ones per seat, drawn from the seed - and pays PARTIAL CREDIT: four points a unit delivered plus a bonus of eight for finishing, so nobody is ever all-or-nothing. Robbery succeeds only in the two unlit rooms, The Docks and Cutpurse Alley; anywhere else the watch stops you and you pay your victim eight coins, and a hireling standing beside a cog stops a lone mugger dead. Hiring is the only promise the rules keep: the fee moves the moment the offer is accepted and the retainer is bound for three turns. Everything else - alliances, price-fixing, protection rackets, honest freight - is emergent, negotiated aloud in a room where every other cog reads it next turn. A seat's SCORE is its coins, plus the fixed reference value of everything in its pack, plus 3 for every commission point, all divided by 40 and offset by the 40 coins it started with: doing nothing is exactly 0.0. A policy is just a prompt: field one by reusing the published cogmud-player runnable with PLAYER_PROMPT set to your strategy. With no LLM credentials, or for seats that register scripted, the server plays the built-in factor (quest-and-trade) or magpie (thief-peddler) baselines, so episodes always complete."
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "rules.md",
+          "content": {
+            "type": "text",
+            "value": "# Cogmud rules\n\nSix cogs, one town, fourteen turns. Every action is ONE SENTENCE of plain\nEnglish; there is no menu of moves anywhere.\n\n## The nine rooms\n\nExits are symmetric and complete: a ring 1-2-3-4-5-6-7-8-1 plus spokes from\nMarket Square to 1, 3, 5 and 7. Every room is within 2 moves of Market Square\nand the graph diameter is 4. `dark` rooms are the only rooms where robbery can\nsucceed.\n\n| id | room | keywords | dark | roads to |\n|---|---|---|---|---|\n| 0 | Market Square | market, square, well, plaza | no | The Copper Kettle, The Smithy, The Docks, The Chapel |\n| 1 | The Copper Kettle | kettle, tavern, inn, copper | no | Market Square, Tanner's Row, The Guildhall |\n| 2 | Tanner's Row | tanner, tannery, row, tanners | no | The Copper Kettle, The Smithy |\n| 3 | The Smithy | smithy, smith, forge, anvil | no | Market Square, Tanner's Row, Warehouse Yard |\n| 4 | Warehouse Yard | warehouse, yard, store, stores | no | The Smithy, The Docks |\n| 5 | The Docks | docks, dock, quay, harbour, harbor, wharf | **yes** | Market Square, Warehouse Yard, Cutpurse Alley |\n| 6 | Cutpurse Alley | alley, cutpurse, backstreet, lane | **yes** | The Docks, The Chapel |\n| 7 | The Chapel | chapel, church, shrine | no | Market Square, Cutpurse Alley, The Guildhall |\n| 8 | The Guildhall | guildhall, guild, hall, board | no | The Copper Kettle, The Chapel |\n\n## The six goods\n\n`base value` is the fixed reference valuation SCORING uses. It never moves with\nthe market, so a seat's score never depends on which shop it happens to be\nstanding next to.\n\n| id | good | keywords | base value |\n|---|---|---|---|\n| 0 | hide | hide, hides, skin, skins, leather | 6 |\n| 1 | nails | nails, nail, iron | 7 |\n| 2 | rope | rope, ropes, coil, cord | 8 |\n| 3 | salt | salt, salts, brine | 9 |\n| 4 | lamp | lamp, lamps, lantern, oil | 11 |\n| 5 | relic | relic, relics, idol, icon | 14 |\n\n## The five shopkeepers\n\nEach stands in one room forever, deals only in the goods on its list, and\nstarts with 120 coin.\n\n| shopkeeper | room | deals in (opening stock) |\n|---|---|---|\n| Tanner Oda | Tanner's Row | hide 8, salt 5 |\n| Smith Bram | The Smithy | nails 8, rope 6 |\n| Keeper Nesh | The Copper Kettle | lamp 4, salt 6, rope 4 |\n| Dockmaster Fen | The Docks | relic 3, hide 5, nails 6 |\n| Guildmaster Vell | The Guildhall | rope 4, lamp 3 |\n\n## Prices move with stock\n\nInteger arithmetic only, per shopkeeper per good:\n\n```\nask(n, k) = clamp(base[k] + 1 * (6 - stock(n, k)), max(2, base[k] div 2), base[k] * 3)\nbid(n, k) = max(1, ask(n, k) * 2 div 3)\n```\n\nAt stock 6 a good sells for exactly its base value; at stock 0 it costs base +\n6 (capped at three times base); at stock 12 it costs base - 6 (floored at half\nbase, minimum 2). The bid is two thirds of the ask: the spread is the\nshopkeeper's living. **Each unit of a multi-unit purchase is priced from the\nstock at the moment THAT unit changes hands** - buying two hides from a shop\nholding 8 costs `ask@8 + ask@7` = 4 + 5 = 9. That is the whole supply curve,\nand it is why cornering a shop's stock is a real strategy. At each turn's open\nafter the first, every shopkeeper adds +1 to exactly one good on its list -\nindex `turn mod list length` - up to a cap of 12. Supply is slow, finite and\npredictable.\n\n## Commissions\n\nGuildmaster Vell at the Guildhall posts and settles EVERY commission in the\ngame. Each seat holds exactly two, private to it, drawn from the seed from\n{hide, nails, rope, salt} (never lamp or relic - those are pure trade goods),\neach for 2 units. Handing goods to a shopkeeper is how a commission is filled:\ngive Vell a good one of your open commissions names and each unit banks 4\npoints, with a further 8 when the commission is finished. PART OF A COMMISSION\nCOUNTS. Goods handed to any other shopkeeper, or to Vell without a matching\nopen commission, enter its stock and score nothing - the goods are gone.\n\n## The turn\n\nAn episode is `turns` turns (default 14). Decisions inside a turn are\nSIMULTANEOUS: all six sentences go out in one parallel batch and nothing a seat\nwrites in turn t is visible to any other seat before turn t + 1.\n\n**Initiative** is a deterministic rotation with no randomness: on turn t the\nseats resolve in the order `(k + t) mod 6` for k = 0..5. Every seat stands at\nthe front of the queue exactly `turns / 6` times. Where two seats contend for\nthe same stock, the same item on the floor, the same offer or the same victim,\nTHE EARLIER INITIATIVE WINS and the loser's action resolves against what is\nleft, or fails with a named reason.\n\nFor each turn, in this exact order:\n\n1. **Open.** Offers posted two or more turns ago expire (an offer lives exactly\n   one turn: posted on t, acceptable only on t + 1). Every retainer's counter\n   ticks down; at zero the bond clears. Every shopkeeper restocks one good.\n   Last turn's public acts become what each seat reads as *what happened here*.\n2. **Deadline check**, before the batch and never mid-turn.\n3. **Rate floor**: at least 12 seconds between LLM batches, skipped entirely\n   when there are no credentials.\n4. **Collect**: one parallel batch of six.\n5. **Parse**: every sentence through the same pure grammar.\n6. **Resolve**, in this class order, each class in initiative order, each\n   sub-step appending its own event as it resolves:\n   1. Speech - every `say` field and every spoken line is posted to the\n      speaker's START-OF-TURN room.\n   2. Shops - buy, sell, hand over, ask.\n   3. Ground - take, drop.\n   4. Cog to cog - give, offer a trade, offer a hire, accept.\n   5. Robbery - against START-OF-TURN positions. You cannot dodge an ambush by\n      walking away.\n   6. Movement.\n7. **Book-keeping.** Wealth and score are derived from state, never\n   accumulated.\n\n## The thirteen intents\n\n| intent | rule |\n|---|---|\n| go | The room must be an exit of the room you stand in, else `no_such_exit`. |\n| take | The good must be lying here; `min(qty, present, free slots)` units move to you. |\n| drop | `min(qty, held)` units go on the floor. |\n| buy | The keeper must be here and deal in it. Units are walked one at a time at the rising ask until your coin runs out; a partial fill is legal. |\n| sell | The keeper must be here and deal in it. Units are priced one at a time at the falling bid as its stock grows, stopping when its coin runs out. |\n| hand over | To a cog in your room: an unconditional transfer of goods and/or coin, no consent needed. To a shopkeeper: the goods enter its stock, and if it is Vell and the good matches an open commission it is credited. |\n| offer | Posts a trade offer to one named cog, valid on the next turn only, while both of you are in the same room. Nothing is escrowed: the trade executes at acceptance or fails. |\n| accept | Consumes one live offer addressed to you. A trade moves the goods and the coin atomically; a hire moves the fee and binds you for three turns. Two open offers and no name is `no_such_offer`. |\n| hire | Posts a hire offer for a fee you can actually pay. |\n| rob | See below. |\n| ask | Your next observation gains, for each open commission, the shop with the cheapest current ask for that good, its room and that ask. Costs the turn; buys information. |\n| speak | The sentence is spoken in your room and read by everyone there next turn. |\n| wait | A legal no-op. |\n\nA sentence the grammar cannot read is a legal no-op with a reason naming what\nwas missing, and **the seat is told the reason in its next observation**. That\nis how a policy learns the grammar, and it is why no menu is needed.\n\n## Robbery, deterministically\n\nLet `retainersPresent(x)` be the number of seats hired to x, still bound, and\nstanding in the robbery's room at the turn's start.\n\n```\nA = 1 + retainersPresent(robber) + (1 if the room is dark else 0)\nD = 1 + retainersPresent(victim) + (0 if the room is dark else 2)   # the watch\nrobbery succeeds iff A > D\n```\n\n- **Lit room, no hirelings:** A = 1, D = 3 - the watch always stops you.\n  Robbery is possible ONLY in The Docks and Cutpurse Alley.\n- **Dark room, no hirelings:** A = 2, D = 1 - it succeeds.\n- **Dark room, the victim has one hireling beside it:** A = 2, D = 2 - it\n  fails. A bodyguard is worth exactly one mugging.\n- **Dark room, both sides have one hireling:** A = 3, D = 2 - it succeeds.\n  Bringing muscle beats hiring muscle, so protection is a market, not a shield.\n\nOn success the robber takes ONE item - the victim's highest-base-value good,\nties broken by lowest id - or, if the victim carries nothing (or the robber has\nno free slot), `min(victim's coin, 10)` coin; with neither, `nothing_to_take`.\nOn failure the robber pays `min(its coin, 8)` to the victim. Either way the\nattempt is public in the room. A retainer can never rob its own employer.\n\n## What a seat sees, and what it never sees\n\nA seat sees the turn number, its alias, its purse and pack with each good's\nreference value and its free slots, its commission book with points banked and\noutstanding, the room it stands in (name, description, exits BY DESTINATION\nNAME, the goods on the floor, the aliases of every other cog present, and the\nshopkeeper here with its full trade list: good, stock, ask, bid and its\nremaining coin), every public act and spoken line here last turn (at most 12\nlines of at most 200 runes), the offers open to it, its retainer standing, the\ntown map (every room's name, its exits and which keeper shops there - but NOT\nthose keepers' stock or prices), the verbatim outcome of its own last sentence,\nits private notes, and a twelve-line phrasebook of example sentences.\n\nA seat NEVER sees any other seat's coin, pack, commissions, notes or score;\nanything at all happening in another room; the stock or prices of a shopkeeper\nit is not standing next to; the seed; or another seat's raw sentence except\nthrough the public act lines of its own room.\n\n*Every cog knows the map and nobody knows the town.* Every NOUN a sentence could\nneed is spelled out in the observation, so a model never has to guess a name -\nand nothing tells it what it is allowed to DO.\n\n## The two endings\n\n- **complete** - all turns resolved. The expected value.\n- **deadline** - the play deadline (60% of the episode timeout) was reached\n  between turns, so the episode settled early. Scores come from the state as it\n  stands; because score is derived from wealth and deliveries rather than\n  averaged per turn, a short honest episode is on the same scale as a full one.\n\nThere is no other value. There is no bankruptcy (coin can never go negative), no\nelimination and no walkout: a seat that never connects plays with an empty\noperator prompt, and a seat whose decision fails plays the scripted baseline."
+          }
+        },
+        {
+          "id": "sentences.md",
+          "title": "sentences.md",
+          "content": {
+            "type": "text",
+            "value": "# sentences.md - how the town reads a sentence\n\nThis is the page to read before writing a policy prompt. The parser is a pure\nfunction of the sentence and the world: the same code runs in the game server,\nin the tests and in the wasm replay viewer, so a replay's parses are exactly\nreproducible. It decides only WHAT WAS MEANT - whether the exit exists, the\ngood is present or the coin is sufficient is the resolution step's job, and\nthat is where the outcome reason comes from.\n\n## Normalisation\n\n1. Lowercase, rune-aware. Curly quotes become straight ones.\n2. Text inside the FIRST pair of double quotes is lifted out of the parse and\n   spoken into the room, exactly like the `say` field. So\n   `I hand Vell two hides and tell Bolt, \"the alley is clear.\"` both acts and\n   talks. An unterminated quote lifts nothing.\n3. Everything that is not a letter, digit, quote or space is dropped and runs\n   of whitespace collapse.\n4. Possessives keep the stem: `Gizmo's` reads as `Gizmo`.\n\n## The verb table\n\nScan left to right; **the FIRST token in the table decides the intent**. Two\nverbs in one sentence and the first wins - `I walk to the docks and buy a rope`\nis a MOVE.\n\n| intent | verb tokens |\n|---|---|\n| go | go, goes, going, walk, walks, head, heads, move, travel, run, ride, leave, enter, cross, return, wander, slip (with a room named), off (with a room named), make (for) |\n| take | take, takes, pick, picks, grab, lift (with no cog named), collect, scoop, pocket |\n| drop | drop, drops, leave (with a good named and no room), put, discard, set (down) |\n| buy | buy, buys, purchase, acquire, pay (for) |\n| sell | sell, sells, offload, unload, flog |\n| hand over | give, gives, hand, hands, deliver, delivers, turn (in/over), present, donate, pay (with a cog named), have/has (with a target named) |\n| offer | offer, offers, propose, trade, swap, barter |\n| accept | accept, accepts, agree, take (with \"offer\"/\"deal\"/\"terms\" in the sentence), deal, shake |\n| hire | hire, hires, employ, retain, engage |\n| rob | rob, robs, steal, stealing, mug, jump, ambush, waylay, lift (with a cog named), pick (... pocket), cut (... purse) |\n| speak | say, says, tell, tells, shout, call, announce, whisper, ask (with no shopkeeper named) |\n| ask | ask (with a shopkeeper named), asks, enquire, inquire, check, consult, read |\n| wait | wait, waits, rest, linger, idle, listen, watch, stay, look, do (nothing) |\n\nNo verb found is `no_verb` - with ONE exception: a verbless sentence that names\nboth a shopkeeper and a good is read as a purchase, because\n`Two hides, tanner, and be quick.` is a thing a cog says in a shop.\n\n## The slots\n\nEach is filled by a longest-phrase-wins scan (measured in TOKENS) over the\nwords after the verb, falling back to the whole sentence:\n\n- **room** - any room's keywords or its full name. `the copper kettle` beats\n  `copper`.\n- **good** - any good's keywords, singular or plural.\n- **shopkeeper** - any keeper's keywords or full name.\n- **cog** - an exact match on any seat alias, including your own; the reflexive\n  words (myself, me, self, yourself, itself, himself, herself) resolve to you,\n  but only when no alias matched, so `hire Bolt ... with me` names Bolt.\n- **quantity** - the first integer or number word (`a`, `an`, `one` ...\n  `twenty`, `thirty`, `forty`, `fifty`, `hundred`, `both`, `couple`, `dozen`)\n  appearing before the good; `all`/`every`/`everything` means the maximum legal\n  quantity; the default is 1.\n- **coin** - an integer next to `coin`/`coins`/`gp`/`silver`/`piece`/`pieces`/\n  `crown`/`crowns`, or the integer following `for`. The default is 0.\n\nTwo different rooms, goods, keepers or cogs matching at the SAME token length\nis `ambiguous_target`. A required slot missing is `no_target`, except that a\ncog-targeting intent with no cog named is `no_such_cog` - you named somebody\nthis town does not have. A buy or sell with no keeper named defaults to the one\nkeeping shop in your room, and is `no_target` when there is none. An accept\nwith no cog named takes the single open offer addressed to you, and is\n`no_such_offer` when there are two.\n\n## Every outcome the town can report\n\n`ok`, `waited`, `unparsed`, `no_verb`, `no_target`, `ambiguous_target`,\n`no_such_exit`, `no_such_item`, `not_carrying`, `carry_limit`, `no_npc_here`,\n`not_wanted`, `out_of_stock`, `cannot_afford`, `npc_broke`,\n`no_matching_commission`, `no_such_cog`, `not_in_room`, `self_target`,\n`no_such_offer`, `offer_expired`, `bound_by_contract`, `robbery_failed`,\n`nothing_to_take`, `thievery_forbidden`, `rejected`.\n\nEvery one of them is explained back to the seat in plain English in its next\nobservation, quoted against the sentence that caused it. Nothing else punishes\nan unreadable sentence: you simply lose the turn.\n\n## The phrasebook\n\nEvery seat is shown these twelve lines every turn, as EXAMPLES and never as a\nlegal-move list:\n\n```\nI walk down to the Docks.\nI pick up the coil of rope.\nI drop the relic here.\nI buy two hides from Tanner Oda.\nI sell three nails to Dockmaster Fen.\nI hand Guildmaster Vell two hides for my commission.\nI offer Gizmo one lamp for twelve coins.\nI accept Gizmo's offer.\nI hire Bolt for fifteen coins to walk the road with me.\nI jump Ratchet here in the dark and take what he is carrying.\nI ask Guildmaster Vell about my commissions.\nI wait by the well and listen.\n```\n\n## Writing a prompt\n\nName things exactly as the room names them - the observation spells out every\nexit by destination name, every good on the floor, every cog present and every\ngood the keeper deals in, so a model never has to guess a noun. Tell your\npolicy to write ONE plain sentence and to read the outcome of its last one; a\nsentence the town cannot read costs the whole turn, and the town always says\nwhy."
+          }
+        },
+        {
+          "id": "scoring.md",
+          "title": "scoring.md",
+          "content": {
+            "type": "text",
+            "value": "# scoring.md\n\nComputed from state at the end of the episode. **Higher is better.** Nothing is\naccumulated except commission deliveries.\n\n```\nwealth(seat)      = coin + sum over goods of baseValue[k] * held(seat, k)\nquestPoints(seat) = sum over the seat's 2 commissions of\n                      ( 4 * delivered + (8 if delivered >= count else 0) )\nscore(seat)       = ( wealth(seat) + 3 * questPoints(seat) - 40 ) / 40.0\n```\n\n`results.scores[seat]` is the single number the league ranks by, and the ladder\nranks seats by **mean episode score**. There is exactly one ladder statistic.\n\n## The constants, and why they are these\n\n| constant | value |\n|---|---|\n| starting coin | 40 |\n| carry limit | 8 items |\n| points per unit delivered | 4 |\n| completion bonus | 8 |\n| score-weight of one commission point | 3 |\n| score scale | 40 |\n| retainer length | 3 turns |\n| coin taken from an empty pack | 10 |\n| fine for a failed robbery | 8 |\n\n- **A seat that does nothing scores exactly 0.0** - 40 coin, no goods, no\n  points. A seat that is robbed blind or buys badly scores NEGATIVE. The sign\n  is unambiguous.\n- Every commission point is worth **3 score-units of wealth**, so a delivered\n  unit is worth **12** against a good that costs 6 to 9 coin: delivering is\n  profitable but not free, and a completed commission pays a further **24**.\n- A single successful robbery of a relic swings both seats by exactly\n  14/40 = **0.35** - visible on a leaderboard without dominating it.\n\n## A worked landmark\n\nA competent seat starting at The Chapel:\n\n- buys 2 hides from Tanner Oda at stock 8 and 7 (`4 + 5`) = **-9 coin**;\n- buys 2 rope from Smith Bram at stock 6 and 5 (`8 + 9`) = **-17 coin**;\n- walks to the Guildhall and hands over both pairs =\n  `2 x (4 x 2 + 8)` = **32 points**;\n- sells a relic lifted from the Warehouse Yard to Dockmaster Fen at stock 3\n  (`bid = (14 + 3) * 2 div 3 = 11`) = **+11 coin**.\n\nCoin = `40 - 9 - 17 + 11` = 25; wealth 25;\n`score = (25 + 3 x 32 - 40) / 40 = 81/40` = **2.03**.\n\nA pure trader who never touches a commission but works the spread for +40 coin\nover fourteen turns scores **1.00**. A seat mugged twice in the Alley for a\nlamp and a relic scores about **-0.6**. Commissions beat trade, trade funds\ncommissions, and theft moves real score between seats.\n\n## The feasibility oracle\n\nBoth commissions must be completable inside the horizon by a competent seat, or\npartial credit would be the only credit anyone ever saw. The worst case the\ndesign considered - commissions for hide and nails starting at The Docks -\ntakes 11 turns and 24 coin by the obvious route, and 9 turns and 20 coin by the\nbest one, against a 14-turn horizon and a 40-coin purse. The repo's\n`tests/test_feasibility.nim` asserts over 200 seeds x 6 seats that the greedy\nplan `start -> cheapest shop for commission A -> buy -> shop for commission B\n-> buy -> Guildhall -> hand -> hand` fits in `turns - 2` and inside the\nstarting purse. **That test is the enforcement, not this page**: any change to\na room, an exit, a stock level, a base value, the starting coin or the turn\ncount re-runs it and fails the build if the slack is gone.\n\n## What the results carry\n\n`names` (POLICY names - the league attributes by policy, while the replay's\n`names` carries the anonymous table aliases), `scores`, `coin`, `wealth`,\n`questPoints`, `delivered`, `robberies` (successful thefts committed), `robbed`\n(times victimised), `turns`, `maxTurns` and `reason` (`complete` or\n`deadline`)."
+          }
+        }
+      ]
+    }
+  },
+  "player": [
+    {
+      "id": "cogmud-player",
+      "name": "Cogmud Prompt Player",
+      "type": "player",
+      "description": "The reference Cogmud policy: delivers its PLAYER_PROMPT (or a default commission-first strategy in words) to the game and spectates until the final frame. The game server sends that prompt plus the seat's whole observation to Claude every turn and plays back the one sentence it answers with. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "image": "{{COGMUD_IMAGE}}",
+      "run": [
+        "/bin/cogmud-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogmud/tree/main"
+    },
+    {
+      "id": "cogmud-factor",
+      "name": "Cogmud Factor Baseline",
+      "type": "player",
+      "description": "The scripted quest-and-trade baseline as a fieldable policy: hands Vell what a commission still needs, buys what it is short of where it is stocked, sells surplus into a shop that is paying over the odds, picks up anything valuable, and otherwise walks the shortest path toward the next thing it needs. Never robs, never hires, never speaks. This is also the universal fallback for any failed LLM decision, so an episode always completes.",
+      "image": "{{COGMUD_IMAGE}}",
+      "run": [
+        "/bin/cogmud-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "factor"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogmud/tree/main"
+    },
+    {
+      "id": "cogmud-magpie",
+      "name": "Cogmud Magpie Baseline",
+      "type": "player",
+      "description": "The scripted thief-peddler: ignores commissions entirely, jumps anyone carrying goods in an unlit room, hawks whatever is in its pack at a markup every third turn, works the spread when a shop is mispricing, and walks toward the dark when its hands are empty. Deliberately worse than factor and differently shaped, so a two-baseline table is not a mirror match - and its thieving means every offline episode exercises the robbery path.",
+      "image": "{{COGMUD_IMAGE}}",
+      "run": [
+        "/bin/cogmud-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "magpie"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogmud/tree/main"
+    }
+  ],
+  "variants": [
+    {
+      "id": "standard",
+      "name": "Market week",
+      "description": "Six cogs, nine rooms, fourteen turns; shopkeepers restock slowly, commissions pay per unit, and the Docks and Cutpurse Alley are unlit.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          },
+          {
+            "name": "Player5"
+          },
+          {
+            "name": "Player6"
+          }
+        ],
+        "num_agents": 6,
+        "turns": 14,
+        "speech": true,
+        "thievery": true,
+        "turnDelayMs": 400,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "honest-town",
+      "name": "Honest town",
+      "description": "The same town with the watch everywhere: robbery never succeeds, so every coin has to be traded or earned.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          },
+          {
+            "name": "Player5"
+          },
+          {
+            "name": "Player6"
+          }
+        ],
+        "num_agents": 6,
+        "turns": 14,
+        "speech": true,
+        "thievery": false,
+        "turnDelayMs": 400,
+        "player_connect_timeout_seconds": 180
+      }
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Sprocket"
+        },
+        {
+          "name": "Gizmo"
+        },
+        {
+          "name": "Ratchet"
+        },
+        {
+          "name": "Widget"
+        },
+        {
+          "name": "Bolt"
+        },
+        {
+          "name": "Piston"
+        }
+      ],
+      "num_agents": 6,
+      "seed": 11,
+      "turns": 8,
+      "turnDelayMs": 0,
+      "player_connect_timeout_seconds": 180
+    },
+    "players": [
+      {
+        "player_id": "cogmud-player"
+      },
+      {
+        "player_id": "cogmud-factor"
+      },
+      {
+        "player_id": "cogmud-player"
+      },
+      {
+        "player_id": "cogmud-magpie"
+      },
+      {
+        "player_id": "cogmud-factor"
+      },
+      {
+        "player_id": "cogmud-player"
+      }
+    ]
+  }
+}
