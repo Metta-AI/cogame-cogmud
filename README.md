@@ -99,6 +99,7 @@ for t in tests/*.nim; do nim r --path:src "$t"; done
 | `tests/test_score.nim` | the scoring formula, its sign, the worked landmark, and what the league ranks by |
 | `tests/test_feasibility.nim` | the greedy commission plan fits inside `turns - 2` and the starting purse over 200 seeds × 6 seats |
 | `tests/test_viewer.nim` | chrome provenance (byte-for-byte against the starter), the element inventory, the scope-collision guard, and that the emscripten link flags and the JS bootstrap are a matched pair |
+| `tests/test_tuning.nim` | the **grid harness** for the two baselines' five thresholds: it sweeps 30 + 64 parameter points over eight seeds of all-scripted play, re-derives the winner, and regenerates `docs/tuning/baseline-grid.md` — the shipped constants are the sweep's answer, not a guess |
 
 ## The replay viewer
 

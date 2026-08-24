@@ -55,6 +55,20 @@ type
     skFactor = "factor"
     skMagpie = "magpie"
 
+  BaselineParams* = object
+    ## The five numeric thresholds the two baselines turn on. They are a
+    ## parameter object rather than literals in the rules because they were
+    ## SEARCHED, not chosen: `tests/test_tuning.nim` is a grid harness that
+    ## plays all-scripted episodes over a seed set for every point of the grid
+    ## below and re-derives the winner in CI, and `docs/tuning/baseline-grid.md`
+    ## is that harness's recorded surface. Change a value here and the harness
+    ## reddens unless the new value is the one the sweep picks.
+    factorSellMargin*: int    ## sell when a shop's bid >= baseValue + this
+    factorPickupValue*: int   ## take loose goods worth at least this
+    magpieHawkPeriod*: int    ## hawk the pack every Nth turn
+    magpieSellMargin*: int    ## sell when a shop's bid >= baseValue + this
+    magpieBuyMargin*: int     ## buy when a shop's ask <= baseValue + this
+
   Decision* = object
     sentence*: string
     say*: string
@@ -76,6 +90,14 @@ type
     maxOutputTokens: int
     timeoutSeconds: int
     disabled*: bool
+
+const TunedParams* = BaselineParams(
+  ## The winning point of the sweep recorded in docs/tuning/baseline-grid.md.
+  factorSellMargin: 0,
+  factorPickupValue: 8,
+  magpieHawkPeriod: 3,
+  magpieSellMargin: 1,
+  magpieBuyMargin: -1)
 
 proc parseScriptKind*(text: string): ScriptKind =
   ## PLAYER_SCRIPTED values: "factor"/"1"/"true"/"yes" play the competent
@@ -196,7 +218,7 @@ proc nearestShopFor(sim: Sim, seat, item: int): int =
       best = distance
       result = Npcs[npc].room
 
-proc factorSentence(sim: Sim, seat: int): string =
+proc factorSentence(sim: Sim, seat: int, params: BaselineParams): string =
   ## The competent baseline and the universal fallback for a failed LLM
   ## decision: a greedy quest-and-trade agent. The first rule that applies
   ## wins, and every quantity is clamped against stock, coin, holdings and
@@ -233,7 +255,7 @@ proc factorSentence(sim: Sim, seat: int): string =
       let held = sim.cogs[seat].items[item]
       if held <= 0 or sim.needs(seat, item) > 0 or not dealsIn(npc, item):
         continue
-      if sim.bid(npc, item) >= Items[item].baseValue and
+      if sim.bid(npc, item) >= Items[item].baseValue + params.factorSellMargin and
           sim.npcs[npc].coin >= sim.bid(npc, item):
         return "I sell " & itemName(item, held) & " to " & Npcs[npc].name & "."
 
@@ -242,7 +264,8 @@ proc factorSentence(sim: Sim, seat: int): string =
     for item in 0 ..< ItemKinds:
       if sim.rooms[here].items[item] <= 0:
         continue
-      if sim.needs(seat, item) > 0 or Items[item].baseValue >= 8:
+      if sim.needs(seat, item) > 0 or
+          Items[item].baseValue >= params.factorPickupValue:
         return "I pick up the " & Items[item].name & "."
 
   ## 5. Walk one room along the BFS shortest path toward what we need next.
@@ -271,7 +294,7 @@ proc factorSentence(sim: Sim, seat: int): string =
   ## 6. Nothing applies.
   "I wait and watch the road."
 
-proc magpieSentence(sim: Sim, seat: int): string =
+proc magpieSentence(sim: Sim, seat: int, params: BaselineParams): string =
   ## The second filler: a thief-peddler that ignores commissions entirely.
   ## Deliberately worse and differently shaped, so a two-baseline table is not
   ## a mirror match — and its robbery means every offline smoke episode
@@ -292,7 +315,7 @@ proc magpieSentence(sim: Sim, seat: int): string =
           " here in the dark and take what he is carrying."
 
   ## 2. Every third turn, hawk the cheapest thing in the pack at a markup.
-  if sim.turn mod 3 == 0 and sim.carried(seat) > 0:
+  if sim.turn mod params.magpieHawkPeriod == 0 and sim.carried(seat) > 0:
     for other in 0 ..< Seats:
       if other == seat or sim.cogs[other].room != here:
         continue
@@ -309,7 +332,7 @@ proc magpieSentence(sim: Sim, seat: int): string =
       let held = sim.cogs[seat].items[item]
       if held <= 0 or not dealsIn(npc, item):
         continue
-      if sim.bid(npc, item) >= Items[item].baseValue + 1 and
+      if sim.bid(npc, item) >= Items[item].baseValue + params.magpieSellMargin and
           sim.npcs[npc].coin >= sim.bid(npc, item):
         return "I sell " & itemName(item, held) & " to " & Npcs[npc].name & "."
     ## 4. A shop selling under the odds.
@@ -317,7 +340,8 @@ proc magpieSentence(sim: Sim, seat: int): string =
       if not dealsIn(npc, item) or sim.npcs[npc].stock[item] <= 0 or free <= 0:
         continue
       let price = sim.ask(npc, item)
-      if price <= Items[item].baseValue - 1 and sim.cogs[seat].coin >= price:
+      if price <= Items[item].baseValue + params.magpieBuyMargin and
+          sim.cogs[seat].coin >= price:
         return "I buy " & itemName(item, 1) & " from " & Npcs[npc].name & "."
 
   ## 5. Ramble. A thief-peddler alternates: empty-handed it walks toward the
@@ -342,17 +366,20 @@ proc magpieSentence(sim: Sim, seat: int): string =
     step = Rooms[here].exits[0]
   "I wander over to " & Rooms[step].name & "."
 
-proc scriptedSentence*(sim: Sim, seat: int, kind: ScriptKind): string =
+proc scriptedSentence*(sim: Sim, seat: int, kind: ScriptKind,
+    params: BaselineParams = TunedParams): string =
   ## Both baselines emit well-formed English that the SAME parseSentence
   ## reads: the server parses a baseline's sentence exactly as it parses an
   ## LLM's, so the baselines are a live, per-episode test of the parser.
   case kind
-  of skMagpie: magpieSentence(sim, seat)
-  else: factorSentence(sim, seat)
+  of skMagpie: magpieSentence(sim, seat, params)
+  else: factorSentence(sim, seat, params)
 
-proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind): Decision =
+proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind,
+    params: BaselineParams = TunedParams): Decision =
   ## Rule-based baseline for `seat`. Never speaks, never writes notes.
-  Decision(sentence: scriptedSentence(sim, seat, kind), say: "", notes: "")
+  Decision(sentence: scriptedSentence(sim, seat, kind, params), say: "",
+    notes: "")
 
 # ---- Prompt building --------------------------------------------------------
 
