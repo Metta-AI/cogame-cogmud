@@ -384,8 +384,10 @@ suite "the failure vocabulary":
     check intent.kind == iNone
     check intent.reason == oNoNpcHere
 
-  test "every outcome reason is a legal enum value the sim can name":
-    ## The complete vocabulary; sim.nim's outcomeText covers every one.
+  test "every outcome reason has prose a seat can read":
+    ## Half of the design's claim: outcomeText names all 26. The other half -
+    ## that the rules PRODUCE 25 of them, and why `rejected` is the exception -
+    ## is driven case by case in test_sim.nim's outcome-vocabulary suite.
     var seen = 0
     for reason in Outcome:
       let text = table0().outcomeText(

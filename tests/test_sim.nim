@@ -1097,3 +1097,152 @@ suite "results":
     check results["reason"].getStr() == "complete"
     check results["turns"].getInt() == 6
     check results["maxTurns"].getInt() == 6
+
+# the outcome vocabulary ----------------------------------------------------
+suite "every outcome the rules can reach is produced by a real case":
+  ## tests/test_parse.nim proves every Outcome has prose. This proves the
+  ## other half of the design's claim: that the vocabulary is PRODUCED, not
+  ## merely spelled. Each seat below is driven into one named outcome and the
+  ## reasons are collected off the recorded act events.
+  proc collect(sim: Sim, seen: var HashSet[Outcome]) =
+    for event in sim.events:
+      if event.kind == evAct:
+        seen.incl(event.reason)
+
+  test "25 of the 26 reasons come off a driven case; `rejected` cannot":
+    var seen = initHashSet[Outcome]()
+    var sentences: array[Seats, string]
+    proc reset(sentences: var array[Seats, string]) =
+      for seat in 0 ..< Seats:
+        sentences[seat] = "I wait and watch the road."
+
+    ## Turn 1: the parse-level failures, a wait and a clean buy.
+    var sim = initSim(fixtureConfig(seed = 71))
+    sim.place(0, Npcs[0].room)
+    sentences.reset()
+    sentences[0] = "I buy one hide from " & Npcs[0].name & "."
+    sentences[2] = "!!!"
+    sentences[3] = "the market square"
+    sentences[4] = "I buy."
+    sentences[5] = "I go to the market, the tavern, the tannery, the forge, " &
+      "the yard, the quay, the lane, the shrine and the guild."
+    sim.actAll(sentences)
+    sim.collect(seen)
+
+    ## Turn 2: the slot failures.
+    var far = -1
+    for room in 0 ..< RoomCount:
+      if room != 0 and not Adjacency[0][room]:
+        far = room
+    check far >= 0
+    for seat in [0, 1, 2, 3, 4]:
+      sim.place(seat, 0)
+    for item in 0 ..< ItemKinds:
+      sim.rooms[0].items[item] = 0
+    sim.cogs[3].items[0] = CarryLimit          # a full pack
+    sim.rooms[0].items[5] = 1                  # something to reach for
+    sim.place(5, Npcs[0].room)
+    sim.cogs[5].items[5] = 1                   # a relic Oda does not deal in
+    sentences.reset()
+    sentences[0] = "I walk to " & Rooms[far].name & "."
+    sentences[1] = "I pick up the lamp."
+    sentences[2] = "I drop the rope."
+    sentences[3] = "I pick up the relic."
+    sentences[4] = "I check the board."
+    sentences[5] = "I sell one relic to " & Npcs[0].name & "."
+    sim.actAll(sentences)
+    sim.collect(seen)
+
+    ## Turn 3: the shop and commission failures, and two bad robbery targets.
+    sim.place(0, Npcs[0].room)
+    sim.npcs[0].stock[0] = 0
+    sim.place(1, Npcs[1].room)
+    sim.cogs[1].coin = 0
+    sim.place(2, Npcs[1].room)
+    sim.cogs[2].items[Npcs[1].tradeList[0]] = 1
+    sim.npcs[1].coin = 0
+    sim.place(3, Npcs[GuildNpc].room)
+    sim.cogs[3].items[5] = 1                   # a relic is never a commission
+    sim.place(4, 0)
+    sim.place(5, 6)                            # nowhere near seat 0
+    sentences.reset()
+    sentences[0] = "I buy one hide from " & Npcs[0].name & "."
+    sentences[1] = "I buy one " & Items[Npcs[1].tradeList[0]].name & " from " &
+      Npcs[1].name & "."
+    sentences[2] = "I sell one " & Items[Npcs[1].tradeList[0]].name & " to " &
+      Npcs[1].name & "."
+    sentences[3] = "I hand " & Npcs[GuildNpc].name & " one relic."
+    sentences[4] = "I jump Wrenchington here in the dark and take what he " &
+      "is carrying."
+    sentences[5] = "I jump " & sim.names[0] &
+      " here in the dark and take what he is carrying."
+    sim.actAll(sentences)
+    sim.collect(seen)
+
+    ## Turn 4: the robbery guards.
+    sim.place(2, 6)
+    sim.place(3, 6)                            # dark
+    sim.cogs[2].retainerOf = 3
+    sim.cogs[2].retainerTurns = RetainerTurns
+    sim.cogs[3].items[5] = 1
+    sim.place(4, 0)
+    sim.place(5, 0)                            # lit: the watch is everywhere
+    sim.cogs[5].items[5] = 1
+    sentences.reset()
+    sentences[0] = "I rob myself."
+    sentences[1] = "I accept the offer."
+    sentences[2] = "I jump " & sim.names[3] &
+      " here in the dark and take what he is carrying."
+    sentences[4] = "I jump " & sim.names[5] &
+      " here in the dark and take what he is carrying."
+    sim.actAll(sentences)
+    sim.collect(seen)
+
+    ## Turn 5: a dark mugging that finds an empty cog.
+    sim.place(0, 5)
+    sim.place(1, 5)
+    sim.cogs[1].coin = 0
+    for item in 0 ..< ItemKinds:
+      sim.cogs[1].items[item] = 0
+    sentences.reset()
+    sentences[0] = "I jump " & sim.names[1] &
+      " here in the dark and take what he is carrying."
+    sim.actAll(sentences)
+    sim.collect(seen)
+
+    ## Turns 6 and 7: an offer whose goods are gone by the time it is taken up.
+    sim.place(0, 0)
+    sim.place(1, 0)
+    sim.cogs[0].items[4] = 1
+    sim.cogs[1].coin = 40
+    sentences.reset()
+    sentences[0] = "I offer " & sim.names[1] & " one lamp for 12 coins."
+    sim.actAll(sentences)
+    sim.cogs[0].items[4] = 0                   # the lamp is gone
+    sentences.reset()
+    sentences[1] = "I accept " & sim.names[0] & "'s offer."
+    sim.actAll(sentences)
+    sim.collect(seen)
+
+    ## An honest town: the same mugging is refused outright.
+    var honest = initSim(fixtureConfig(seed = 72, thievery = false))
+    honest.place(0, 6)
+    honest.place(1, 6)
+    honest.cogs[1].items[5] = 1
+    sentences.reset()
+    sentences[0] = "I jump " & honest.names[1] &
+      " here in the dark and take what he is carrying."
+    honest.actAll(sentences)
+    honest.collect(seen)
+
+    ## `rejected` is the one reason no case can drive: nothing in sim.nim ever
+    ## sets it. It exists for server.nim's belt-and-braces guard, which logs a
+    ## refused action and plays a wait instead - so a seat reads `waited`, and
+    ## the vocabulary entry is a declaration for the protocol, not an outcome
+    ## the rules can produce. It is asserted to have prose in test_parse.nim.
+    for reason in Outcome:
+      if reason == oRejected:
+        continue
+      checkpoint("outcome " & $reason)
+      check reason in seen
+    check oRejected notin seen
