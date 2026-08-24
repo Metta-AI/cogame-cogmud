@@ -1114,11 +1114,23 @@ proc tableStateJson*(sim: Sim): JsonNode =
     deliveredUnits += sim.deliveredTotal(seat)
     robberies += sim.cogs[seat].robberies
   var trades = 0
+  var wasRobbed: array[Seats, bool]
   for event in sim.events:
-    if event.kind == evAct and event.reason == oOk and
-        (event.intent == iAccept or event.intent == iTrade or
-         event.intent == iHire):
+    if event.kind != evAct or event.reason != oOk:
+      continue
+    if event.intent == iAccept or event.intent == iTrade or
+        event.intent == iHire:
       inc trades
+    ## The scorebug's red ROBBED chip: a victim is marked for the turn the
+    ## theft resolved on and the turn after it, which is the "turn after a seat
+    ## is victimised" the readouts promise.
+    if event.intent == iRob and event.other >= 0 and
+        event.turn >= sim.turn - 1:
+      wasRobbed[event.other] = true
+  var recentRobbed = newJArray()
+  for seat in 0 ..< Seats:
+    if wasRobbed[seat]:
+      recentRobbed.add(%seat)
   %*{
     "world": worldJson(),
     "seats": seats,
@@ -1126,6 +1138,7 @@ proc tableStateJson*(sim: Sim): JsonNode =
     "npcs": npcs,
     "offers": offers,
     "chronicle": sim.chronicleJson(),
+    "recentRobbed": recentRobbed,
     "town": {
       "coinInPlay": coinInPlay,
       "delivered": deliveredUnits,

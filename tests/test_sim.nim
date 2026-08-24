@@ -590,6 +590,25 @@ suite "robbery":
     check sim.cogs[0].items[5] == 1
     check sim.cogs[1].room == 7                     # the move still happened
 
+  test "the spectator frame names this turn's victims for the ROBBED chip":
+    ## The scorebug draws its red ROBBED chip from state.recentRobbed, so the
+    ## spectator projection has to carry it (client/renderer.js's
+    ## updateScorebug).
+    var sim = robFixture(seed = 18)
+    sim.place(0, 6)
+    sim.place(1, 6)
+    sim.cogs[1].items[5] = 1
+    check sim.tableStateJson()["recentRobbed"].len == 0
+    sim.rob(0, 1)
+    check sim.lastAct(0).reason == oOk
+    var marked: seq[int]
+    for node in sim.tableStateJson()["recentRobbed"]:
+      marked.add(node.getInt())
+    check marked == @[1]
+    ## Up for the turn after the theft, down on the one after that.
+    sim.waitAll()
+    check sim.tableStateJson()["recentRobbed"].len == 0
+
 # 10 ------------------------------------------------------------------------
 suite "hire and the retainer":
   test "an accepted hire moves the fee atomically and binds for three turns":
