@@ -741,6 +741,31 @@ suite "rune truncation":
     check encoded.validateUtf8() == -1
     discard parseJson(encoded)
 
+  test "a spoken line lifted out of the sentence is what salience measures":
+    ## The act's `say` field is the line the seat spoke, whichever channel it
+    ## arrived on, so a long line scores 30 even when the reply carried no
+    ## `say` field at all.
+    var sim = initSim(fixtureConfig(seed = 33))
+    let long = "the relic in the yard is mine and I will have it back today"
+    check long.runeLen > 40
+    var sentences: array[Seats, string]
+    for seat in 0 ..< Seats:
+      sentences[seat] = "I wait and watch the road."
+    sentences[0] = "I say \"" & long & "\""
+    sentences[1] = "I say \"short\""
+    sim.actAll(sentences)
+    check sim.lastAct(0).intent == iSay
+    check sim.lastAct(0).say == long
+    check sim.lastAct(0).salience == 30
+    check sim.lastAct(1).say == "short"
+    check sim.lastAct(1).salience == 20
+    ## The room heard it exactly once, not twice.
+    var heard = 0
+    for line in sim.heardLog[sim.cogs[0].room]:
+      if long in line:
+        inc heard
+    check heard == 1
+
   test "speech off silences every say field":
     var sim = initSim(fixtureConfig(seed = 32, speech = false))
     for seat in sim.pendingSeats():

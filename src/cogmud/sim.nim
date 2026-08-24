@@ -303,6 +303,9 @@ proc salienceOf*(event: GameEvent): int =
   of iTrade, iHire:
     if event.reason == oOk: 40 else: 5
   of iSay:
+    ## `say` is the line this seat spoke: the reply's `say` field, or the line
+    ## lifted out of the sentence when the reply carried none (resolveTurn's
+    ## speech class fills it in).
     if event.say.runeLen > 40: 30 else: 20
   of iTake, iDrop:
     if event.reason == oOk: 15 else: 5
@@ -852,7 +855,17 @@ proc resolveTurn(sim: var Sim): seq[Sim] =
       var res = blankResult(intents[seat])
       let spoken = cutRunes(oneLine(intents[seat].spoken), MaxSayLen)
       if spoken.len > 0 and sim.config.speech:
-        sim.logRoom(room, sim.names[seat] & " says: \"" & spoken & "\"")
+        ## A line lifted out of the sentence IS what this seat said aloud, so
+        ## it is what the event's `say` field records and what salienceOf
+        ## measures. When the reply also carried a `say` field the two are
+        ## different lines and both are posted; when it did not, the lifted
+        ## line fills the field. The equality guard is what keeps a replay
+        ## byte-identical: on re-derivation `say` arrives already filled, and
+        ## the line above has posted it once.
+        if spoken != sim.acts[seat].say:
+          sim.logRoom(room, sim.names[seat] & " says: \"" & spoken & "\"")
+        if sim.acts[seat].say.len == 0:
+          sim.acts[seat].say = spoken
       res.line = ""
       result.add(sim.act(seat, position, res))
     elif intents[seat].spoken.len > 0 and sim.config.speech:
