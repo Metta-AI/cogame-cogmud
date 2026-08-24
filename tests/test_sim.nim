@@ -393,6 +393,38 @@ suite "commissions and partial credit":
     check sim.lastAct(0).salience == 5
     check sim.lastAct(1).salience == 5
 
+  test "goods handed to a keeper that does not deal in them are inert":
+    ## Handing something over is irrevocable, and the design says the goods
+    ## enter the keeper's stock - even a good it does not trade. Nothing can
+    ## come back out: resolveBuy checks the trade list before the shelf and
+    ## reports out_of_stock, and the spectator frame prices a non-traded good
+    ## at 0, so the entry is bookkeeping and nothing else.
+    var sim = initSim(fixtureConfig(seed = 10))
+    let stray = 5                               # a relic: never a commission,
+                                                # and Vell trades rope and lamp
+    check not dealsIn(GuildNpc, stray)
+    sim.place(0, Npcs[GuildNpc].room)
+    sim.place(1, Npcs[GuildNpc].room)
+    sim.cogs[0].items[stray] = 2
+    var sentences: array[Seats, string]
+    for seat in 0 ..< Seats:
+      sentences[seat] = "I wait and watch the road."
+    sentences[0] = "I hand " & Npcs[GuildNpc].name & " two " &
+      Items[stray].plural & " for my commission."
+    sim.actAll(sentences)
+    check sim.lastAct(0).reason == oNoMatchingCommission
+    check sim.cogs[0].items[stray] == 0
+    check sim.npcs[GuildNpc].stock[stray] == 2
+    let books = sim.tableStateJson()["npcs"][GuildNpc]
+    check books["ask"][stray].getInt() == 0
+    check books["bid"][stray].getInt() == 0
+    sentences[0] = "I wait and watch the road."
+    sentences[1] = "I buy one " & Items[stray].name & " from " &
+      Npcs[GuildNpc].name & "."
+    sim.actAll(sentences)
+    check sim.lastAct(1).reason == oOutOfStock
+    check sim.cogs[1].items[stray] == 0
+
 # 8 -------------------------------------------------------------------------
 suite "contention resolves by initiative":
   test "the earlier initiative gets the last unit of stock":
