@@ -98,7 +98,9 @@ For each turn, in this exact order:
 
 1. **Open.** Offers posted two or more turns ago expire (an offer lives exactly
    one turn: posted on t, acceptable only on t + 1). Every retainer's counter
-   ticks down; at zero the bond clears. Every shopkeeper restocks one good.
+   ticks down; at zero the bond clears. Every shopkeeper restocks one good -
+   at the open of every turn *after the first*, since the opening stock in the
+   table above is what the shops hold on turn 1.
    Last turn's public acts become what each seat reads as *what happened here*.
 2. **Deadline check**, before the batch and never mid-turn.
 3. **Rate floor**: at least 12 seconds between LLM batches, skipped entirely
