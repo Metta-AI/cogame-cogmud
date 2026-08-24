@@ -78,6 +78,16 @@ suite "world integrity":
         diameter = max(diameter, Dist[source][target])
     check diameter == 4
 
+  test "the world payload publishes what the viewer must not hardcode":
+    ## client/renderer.js reads the item values, the Guildhall's id and the
+    ## commission's per-unit points out of this, so none of them is a literal
+    ## in the browser.
+    let world = worldJson()
+    check world["guild"].getInt() == GuildNpc
+    check world["pointsPerUnit"].getInt() == PointsPerUnit
+    for item in 0 ..< ItemKinds:
+      check world["items"][item]["value"].getInt() == Items[item].baseValue
+
   test "the five shops stand in distinct rooms and deal in real goods":
     var rooms = initHashSet[int]()
     for npc in Npcs:

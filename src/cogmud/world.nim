@@ -115,6 +115,12 @@ const
     ## goods, so a commission can never demand the two most valuable items.
   GuildNpc* = 4
     ## Guildmaster Vell posts and settles EVERY commission in the game.
+  PointsPerUnit* = 4
+  CompletionBonus* = 8
+    ## Commission credit. They live here, with the authored tables, because
+    ## `worldJson` publishes the per-unit figure to the viewer: the browser
+    ## reads the commission constants out of the payload instead of keeping a
+    ## copy of them.
 
 proc buildAdjacency(): array[RoomCount, array[RoomCount, bool]] =
   for room in Rooms:
@@ -184,4 +190,7 @@ proc worldJson*(): JsonNode =
     npcs.add(%*{
       "id": npc.id, "name": npc.name, "room": npc.room, "trade": trade
     })
-  %*{"rooms": rooms, "items": items, "npcs": npcs}
+  %*{
+    "rooms": rooms, "items": items, "npcs": npcs,
+    "guild": GuildNpc, "pointsPerUnit": PointsPerUnit
+  }

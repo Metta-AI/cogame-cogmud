@@ -23,8 +23,8 @@ const
   PriceStep* = 1
   StockCap* = 12
   NpcStartCoin* = 120
-  PointsPerUnit* = 4
-  CompletionBonus* = 8
+  ## PointsPerUnit and CompletionBonus live in world.nim, with the rest of the
+  ## commission constants, so worldJson can publish them.
   PointValue* = 3
   ScoreScale* = 40.0
   RetainerTurns* = 3

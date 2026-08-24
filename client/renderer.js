@@ -138,6 +138,19 @@
     return room ? room.name : "somewhere";
   }
 
+  // The Guildhall keeper's id and the per-unit commission points come from the
+  // world table in the payload, never from literals here: the readouts must not
+  // drift when world.nim or sim.nim changes.
+  function guildOf(world) {
+    var id = world && world.guild;
+    return typeof id === "number" ? id : -1;
+  }
+
+  function pointsPerUnitOf(world) {
+    var value = world && world.pointsPerUnit;
+    return typeof value === "number" ? value : 0;
+  }
+
   // ---- Layout --------------------------------------------------------------
 
   // The map is a FIXED arena: nine rooms on a 0..100 grid, always rescaled to
@@ -943,11 +956,12 @@
 
   // Kinds the scrubber and the reel classify beats by. Five, and the appended
   // chrome block defines a CSS rule for every one of them.
-  function beatKind(event) {
+  function beatKind(event, world) {
     if (event.kind === "end") return "end";
     if (event.kind !== "act") return "";
     if (event.intent === "rob") return "rob";
-    if (event.intent === "give" && event.npc === 4 && event.reason === "ok") {
+    if (event.intent === "give" && event.npc === guildOf(world) &&
+        event.reason === "ok") {
       return "commission";
     }
     if (event.intent === "accept" || event.intent === "hire" ||
@@ -976,7 +990,7 @@
         return who + " sells " + itemName(world, event.item, qty) + " to " +
           npcName(world, event.npc) + " for " + event.coin + " coin.";
       case "give":
-        if (event.npc === 4 && event.reason === "ok") {
+        if (event.npc === guildOf(world) && event.reason === "ok") {
           return itemName(world, event.item, qty) + " delivered — " +
             event.coin + " commission points.";
         }
@@ -1095,7 +1109,8 @@
       var body = line || reasonText;
       if (body) {
         var cls = event.intent === "rob" ? "feed-rob" :
-          (event.intent === "give" && event.npc === 4) ? "feed-commission" :
+          (event.intent === "give" && event.npc === guildOf(w)) ?
+            "feed-commission" :
           event.reason !== "ok" && event.reason !== "waited" ? "feed-fail" :
           "feed-outcome";
         var tail = line && reasonText ? line + " " + reasonText :
@@ -1186,9 +1201,9 @@
           } else if (event.intent === "sell" && event.reason === "ok") {
             pulse(event, now, "market", "+" + event.coin + "c", 1);
           } else if (event.intent === "give" && event.reason === "ok") {
-            if (event.npc === 4) {
+            if (event.npc === guildOf(w)) {
               pulse(event, now, "commission",
-                event.coin > 4 * Math.max(event.qty || 1, 1) ?
+                event.coin > pointsPerUnitOf(w) * Math.max(event.qty || 1, 1) ?
                   "COMMISSION FILLED +" + event.coin :
                   "COMMISSION +" + event.coin, 1);
             } else {
@@ -1230,39 +1245,34 @@
     };
   }
 
-  // Score-by-turn series and the rules under it, derived from the recorded
-  // turn events up to the playhead.
-  function chartFrom(events, limit) {
+  // Score-by-turn series and the rules under it. Both halves come from the
+  // payload and nothing is re-derived here: the series is the sim's OWN score
+  // at each turn frame (states[i] is the state after events[0..<i], produced by
+  // the same wasm re-derivation the rest of the viewer draws), and the rule
+  // markers read the Guildhall's id and the commission's per-unit points from
+  // the world table. A JS copy of the scoring constants would desynchronise the
+  // trend line from the scorebug the moment one of them changed.
+  function chartFrom(events, states, limit, world) {
     var series = [[], [], [], [], [], []];
     var rules = [];
-    var robbed = [0, 0, 0, 0, 0, 0];
-    var filled = [0, 0, 0, 0, 0, 0];
+    var guild = guildOf(world);
+    var perUnit = pointsPerUnitOf(world);
     var stop = limit === undefined ? events.length : limit;
     for (var i = 0; i < stop && i < events.length; i++) {
       var event = events[i];
       if (event.kind === "turn") {
-        (event.cogs || []).forEach(function (cog, seat) {
-          if (seat >= 6) return;
-          var wealth = cog.coin || 0;
-          var values = [6, 7, 8, 9, 11, 14];
-          (cog.items || []).forEach(function (count, id) {
-            wealth += (values[id] || 0) * (count || 0);
-          });
-          var points = 0;
-          (cog.delivered || []).forEach(function (d) {
-            points += 4 * (d || 0) + (d >= 2 ? 8 : 0);
-          });
-          series[seat].push((wealth + 3 * points - 40) / 40);
+        var frame = (states || [])[i + 1];
+        ((frame && frame.seats) || []).forEach(function (seat, index) {
+          if (index >= 6) return;
+          series[index].push(seat.score || 0);
         });
       } else if (event.kind === "act" && event.intent === "rob" &&
           event.reason === "ok") {
         rules.push({ turn: event.turn, kind: "rob" });
-        robbed[event.seat] += 1;
       } else if (event.kind === "act" && event.intent === "give" &&
-          event.npc === 4 && event.reason === "ok" &&
-          event.coin > 4 * Math.max(event.qty || 1, 1)) {
+          event.npc === guild && event.reason === "ok" &&
+          event.coin > perUnit * Math.max(event.qty || 1, 1)) {
         rules.push({ turn: event.turn, kind: "commission" });
-        filled[event.seat] += 1;
       }
     }
     return { series: series, rules: rules };
@@ -1457,7 +1467,12 @@
     makeRenderer(options.canvas, options.assetBase, function (renderer) {
       var latest = null;
       var nameMap = makeNameMap([], null);
-      var effects = makeEffects(null);
+      // Both are built from the first snapshot, because both need the world
+      // table the payload carries (the Guildhall's id, the item values).
+      var effects = null;
+      // The live trend line, sampled once per turn from the seats' own scores.
+      var history = [[], [], [], [], [], []];
+      var sampledTurn = -1;
       var scheme = location.protocol === "https:" ? "wss://" : "ws://";
       var url = scheme + location.host + options.wsPath;
 
@@ -1477,6 +1492,13 @@
               nameMap = makeNameMap(
                 (latest.seats || []).map(function (s) { return s.name; }),
                 latest.policyNames);
+              if (!effects) effects = makeEffects(latest.world);
+              if ((latest.turn || 0) !== sampledTurn) {
+                sampledTurn = latest.turn || 0;
+                (latest.seats || []).forEach(function (seat, index) {
+                  if (index < 6) history[index].push(seat.score || 0);
+                });
+              }
               effects.absorb(latest.events || []);
               if (options.feed) {
                 renderFeed(options.feed, latest.events || [], nameMap,
@@ -1509,11 +1531,12 @@
       connect();
 
       (function frame() {
-        if (latest) {
-          var chart = chartFrom(latest.events || [], undefined);
+        if (latest && effects) {
+          var chart = chartFrom(latest.events || [], undefined, undefined,
+            latest.world);
           var view = stateToView(latest, nameMap, effects, {
             done: !!(latest.done || latest.gameDone),
-            scoreSeries: chart.series,
+            scoreSeries: history,
             chartRules: chart.rules
           });
           renderer.draw(view);
@@ -1561,7 +1584,7 @@
       return a.index - b.index;
     });
     ranked.slice(0, 8).forEach(function (entry) {
-      var kind = beatKind(entry.event) || "market";
+      var kind = beatKind(entry.event, world) || "market";
       var button = document.createElement("button");
       button.type = "button";
       button.className = "treel-beat " + kind + " seat" +
@@ -1611,7 +1634,7 @@
       }
     });
     events.forEach(function (event, i) {
-      var kind = beatKind(event);
+      var kind = beatKind(event, world);
       if (!kind) return;
       if (event.kind === "act" && (event.salience || 0) < 40) return;
       markCogmudBeat(container, i, events.length, kind,
@@ -1739,7 +1762,7 @@
           options.playButton.textContent = running ? "❚❚" : "▶";
           options.playButton.classList.toggle("on", running);
         }
-        var chart = chartFrom(events, index);
+        var chart = chartFrom(events, states, index, world);
         var view = stateToView(currentState(), nameMap, effects, {
           done: index >= events.length && events.length > 0,
           scoreSeries: chart.series,

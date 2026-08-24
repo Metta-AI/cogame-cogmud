@@ -234,6 +234,19 @@ suite "the renderer draws what the readouts promise":
     check "seat.retainerOf" in renderer
     check "boss.room !== seat.room" in renderer
 
+  test "the trend line is the payload's score, not a JS copy of the rules":
+    let renderer = readRepo("client/renderer.js")
+    ## The chart used to re-derive the score from JS literals of the item
+    ## values and the scoring constants; it now reads the per-frame score the
+    ## wasm re-derivation produced, and the commission markers read the
+    ## Guildhall's id and the per-unit points out of the world payload.
+    check "series[index].push(seat.score || 0)" in renderer
+    check "function guildOf(" in renderer
+    check "function pointsPerUnitOf(" in renderer
+    check "[6, 7, 8, 9, 11, 14]" notin renderer
+    check "- 40) / 40" notin renderer
+    check "event.npc === 4" notin renderer
+
   test "the endcard is dismissed by every seek":
     let renderer = readRepo("client/renderer.js")
     check "container.classList.toggle(\"show\", !!show)" in renderer
