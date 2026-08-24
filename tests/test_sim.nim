@@ -39,6 +39,22 @@ proc lastAct(sim: Sim, seat: int): GameEvent =
       return sim.events[index]
   raise newException(ValueError, "no act event for seat " & $seat)
 
+proc questNodes(node: JsonNode, found: var seq[JsonNode]) =
+  ## Every object anywhere in a frame that carries a commission's shape. Used
+  ## to prove a player frame discloses NO commission book but its own.
+  case node.kind
+  of JObject:
+    if node.hasKey("item") and node.hasKey("count") and
+        node.hasKey("delivered"):
+      found.add(node)
+    for _, child in node:
+      questNodes(child, found)
+  of JArray:
+    for child in node:
+      questNodes(child, found)
+  else:
+    discard
+
 proc bfs(source: int): array[RoomCount, int] =
   for room in 0 ..< RoomCount:
     result[room] = -1
@@ -829,9 +845,17 @@ suite "observation split":
             continue
           if sim.notes[other].len > 0:
             check sim.notes[other] notin text
-          for quest in 0 ..< Quests:
-            check ("\"delivered\":" & $sim.quests[other][quest].delivered) ==
-              ("\"delivered\":" & $sim.quests[other][quest].delivered)
+        ## Every commission book anywhere in the frame is this seat's own, in
+        ## its own order: no other seat's item, count or delivered count is
+        ## reachable from here.
+        var books: seq[JsonNode]
+        questNodes(view, books)
+        check books.len == Quests
+        for index, book in books:
+          let mine = sim.quests[seat][index]
+          check book["item"].getStr() == Items[mine.item].name
+          check book["count"].getInt() == mine.count
+          check book["delivered"].getInt() == mine.delivered
         check view{"room"}{"id"}.getInt() == room
         ## No shop's books but the one in this room.
         let here = npcInRoom(room)
