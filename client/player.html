@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cogmud — Player View</title>
+<link rel="stylesheet" href="/client/chrome.css">
+</head>
+<body>
+<div id="layout">
+  <div id="stage">
+    <div id="topband">
+      <div id="wordmark">COG<span>MUD</span></div>
+      <div id="clock">TURN 1</div>
+      <div id="topright">
+        <span id="statuschip">connecting…</span>
+        <button id="feedtoggle">LOG »</button>
+      </div>
+    </div>
+    <div id="scorebug"></div>
+    <div id="townbar"></div>
+    <div id="board-wrap">
+      <canvas id="table" width="960" height="640"></canvas>
+      <div id="lightpool"></div>
+      <div id="grain"></div>
+      <div id="endscreen"></div>
+    </div>
+    </div>
+  <div id="feed"></div>
+</div>
+<script src="/client/renderer.js"></script>
+<script>
+  var canvas = document.getElementById("table");
+  function fit() {
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+  }
+  window.addEventListener("resize", fit);
+  window.addEventListener("load", fit);
+  fit();
+  CogmudRenderer.bindFeedToggle(document.getElementById("feedtoggle"));
+  var params = new URLSearchParams(location.search);
+  CogmudRenderer.attachLive({
+    canvas: canvas,
+    feed: document.getElementById("feed"),
+    status: document.getElementById("statuschip"),
+    clock: document.getElementById("clock"),
+    scorebug: document.getElementById("scorebug"),
+    endscreen: document.getElementById("endscreen"),
+    assetBase: "/client/assets",
+    wsPath: "/player?slot=" + encodeURIComponent(params.get("slot") || "0") +
+      "&token=" + encodeURIComponent(params.get("token") || ""),
+    onFrame: function (data) {
+      if (data.type === "welcome") {
+        document.getElementById("wordmark").innerHTML =
+          "COG<span>MUD</span> — " + data.name;
+      }
+    }
+  });
+</script>
+<!-- =====================================================================
+     COGMUD additions to the inherited cogame-bullwhip chrome.
+     Nothing above this banner is removed or rewritten: every element the
+     starter ships keeps its id (#layout, #stage, #topband, #wordmark, #clock,
+     #topright, #statuschip, #feedtoggle, #scorebug, #board-wrap, canvas#table,
+     #lightpool, #grain, #endscreen, #transport, .scrub#scrub, .tbar,
+     .tbtn#play, .tpos#pos, #feed, #loading) and the fit() + bindFeedToggle
+     bootstrap is the starter's. Two elements are APPENDED - #townbar between
+     #scorebug and #board-wrap, and .treel#reel as a third row inside
+     #transport - and the block below measures the transport band into
+     --band/--hudscale on :root. No zoom bar and no minimap panel: bullwhip
+     ships neither, and the parchment map is a fixed arena that is always
+     wholly in frame at every width.
+     ===================================================================== -->
+<script>
+  // relayout(): --band and --hudscale live on :root (document.documentElement)
+  // so every rule can see them. --band is #transport's measured height, which
+  // therefore INCLUDES the highlight-reel row, since the reel is a child of
+  // #transport. fit() is called from here too, so the canvas and the custom
+  // properties can never disagree.
+  function relayout() {
+    var root = document.documentElement;
+    var transport = document.getElementById("transport");
+    var band = transport ? transport.offsetHeight : 0;
+    root.style.setProperty("--band", band + "px");
+    root.style.setProperty("--hudscale",
+      String(Math.max(0.8, Math.min(1.15, window.innerWidth / 960))));
+    if (typeof fit === "function") fit();
+  }
+  window.addEventListener("load", relayout);
+  window.addEventListener("resize", relayout);
+  relayout();
+</script>
+</body>
+</html>
