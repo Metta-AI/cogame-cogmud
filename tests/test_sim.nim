@@ -722,6 +722,35 @@ suite "hire and the retainer":
     check short.offers.len == 1
     check short.offers[0].coin == 10
 
+  test "a hire taken up this turn already guards its employer this turn":
+    ## A consequence of the class order the design fixes: cog-to-cog (class 4)
+    ## resolves before robbery (class 5), and resolveAccept binds the retainer
+    ## immediately, so a bodyguard hired seconds earlier counts in the
+    ## robbery's arithmetic. Pinned here so the ordering cannot drift silently.
+    var sim = initSim(fixtureConfig(seed = 26))
+    for seat in 0 ..< 3:
+      sim.place(seat, 6)                       # dark
+    sim.cogs[0].items[5] = 1                   # something worth taking
+    var sentences: array[Seats, string]
+    for seat in 0 ..< Seats:
+      sentences[seat] = "I wait and watch the road."
+    sentences[0] = "I hire " & sim.names[1] & " for 5 coins."
+    sim.actAll(sentences)
+    check sim.lastAct(0).reason == oOk
+    for seat in 0 ..< 3:
+      sim.place(seat, 6)
+    sentences[0] = "I wait and watch the road."
+    sentences[1] = "I accept " & sim.names[0] & "'s offer."
+    sentences[2] = "I jump " & sim.names[0] &
+      " here in the dark and take what he is carrying."
+    sim.actAll(sentences)
+    check sim.lastAct(1).reason == oOk
+    check sim.cogs[1].retainerOf == 0
+    ## Attack 2 (dark) against defence 2 (the fresh bodyguard): the mugging
+    ## fails and the relic stays put.
+    check sim.lastAct(2).reason == oRobberyFailed
+    check sim.cogs[0].items[5] == 1
+
   test "a second accepted hire replaces the first":
     var sim = initSim(fixtureConfig(seed = 23))
     for seat in 0 ..< 3:
