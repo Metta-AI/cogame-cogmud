@@ -609,9 +609,12 @@ proc resolveHire(sim: var Sim, seat: int, intent: Intent): ActResult =
   if not sim.cogHere(seat, other):
     result.reason = oNotInRoom
     return
+  ## The fee is CLAMPED into 1 .. the employer's purse, which is the intent
+  ## table's rule ("posts a hire offer for coin (1 .. the seat's coin)"): an
+  ## employer holding 10 who asks for 15 posts at 10. Only an empty purse
+  ## leaves nothing to post and reports oCannotAfford.
   let fee = min(max(1, intent.coin), sim.cogs[seat].coin)
   if fee < 1 or sim.cogs[seat].coin < fee:
-    ## A hire offer above the employer's purse is never posted.
     result.reason = oCannotAfford
     return
   sim.offers.add(Offer(kind: okHire, fromSeat: seat, toSeat: other,

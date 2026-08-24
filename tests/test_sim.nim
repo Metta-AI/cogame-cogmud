@@ -695,7 +695,7 @@ suite "hire and the retainer":
     check sim.cogs[1].retainerTurns == 0
     check sim.cogs[1].retainerOf == -1
 
-  test "a hire offer above the employer's purse is never posted":
+  test "an empty purse posts no hire; a short one posts what it has":
     var sim = initSim(fixtureConfig(seed = 22))
     sim.place(0, 0)
     sim.place(1, 0)
@@ -707,6 +707,20 @@ suite "hire and the retainer":
     sim.actAll(sentences)
     check sim.lastAct(0).reason == oCannotAfford
     check sim.offers.len == 0
+
+    ## The fee is clamped into 1 .. the purse, not refused: an employer with
+    ## 10 coin who asks for 15 posts a 10-coin hire. This is the intent
+    ## table's rule, and it is what the seat is told it did.
+    var short = initSim(fixtureConfig(seed = 25))
+    short.place(0, 0)
+    short.place(1, 0)
+    short.cogs[0].coin = 10
+    sentences[0] = "I hire " & short.names[1] & " for 15 coins."
+    short.actAll(sentences)
+    check short.lastAct(0).reason == oOk
+    check short.lastAct(0).coin == 10
+    check short.offers.len == 1
+    check short.offers[0].coin == 10
 
   test "a second accepted hire replaces the first":
     var sim = initSim(fixtureConfig(seed = 23))
