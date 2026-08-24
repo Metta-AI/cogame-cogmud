@@ -227,6 +227,13 @@ suite "the renderer draws what the readouts promise":
     check "aria-label" in renderer
     check "marker.onclick" in renderer
 
+  test "a hireling is drawn tethered to the employer it is standing with":
+    let renderer = readRepo("client/renderer.js")
+    ## The shield badge says a cog is hired; the amber tether says to whom.
+    check "function drawTether(" in renderer
+    check "seat.retainerOf" in renderer
+    check "boss.room !== seat.room" in renderer
+
   test "the endcard is dismissed by every seek":
     let renderer = readRepo("client/renderer.js")
     check "container.classList.toggle(\"show\", !!show)" in renderer

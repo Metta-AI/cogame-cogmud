@@ -456,16 +456,18 @@
   function drawTokens(ctx, images, L, world, view, now, fx) {
     var seats = view.seats || [];
     var byRoom = {};
+    var byId = {};
+    var spots = {};
     seats.forEach(function (seat) {
       var key = String(seat.room);
       byRoom[key] = byRoom[key] || [];
       byRoom[key].push(seat.seat);
+      byId[String(seat.seat)] = seat;
     });
     seats.forEach(function (seat) {
       var group = byRoom[String(seat.room)] || [seat.seat];
       var here = tokenSpot(L, view, seat.room, group.indexOf(seat.seat),
         group.length);
-      var size = tokenSize(L, view, seat.room);
       var from = (fx.moveFrom || {})[seat.seat];
       var at = (fx.moveAt || {})[seat.seat];
       var spot = here;
@@ -478,6 +480,23 @@
           y: start.y + (here.y - start.y) * eased
         };
       }
+      spots[String(seat.seat)] = spot;
+    });
+    // The amber tether, under the tokens: a hireling is joined to its employer
+    // while they share a room. The shield badge says only THAT a cog is hired;
+    // the tether says to whom, which is what makes a bodyguard legible in a
+    // crowded card.
+    seats.forEach(function (seat) {
+      if (!(seat.retainerTurns > 0) || !(seat.retainerOf >= 0)) return;
+      var boss = byId[String(seat.retainerOf)];
+      if (!boss || boss.room !== seat.room) return;
+      drawTether(ctx, spots[String(seat.seat)], spots[String(boss.seat)],
+        L.scale);
+    });
+    seats.forEach(function (seat) {
+      var group = byRoom[String(seat.room)] || [seat.seat];
+      var spot = spots[String(seat.seat)];
+      var size = tokenSize(L, view, seat.room);
       drawToken(ctx, images, L, view, seat, spot, size,
         group.indexOf(seat.seat), group.length);
       var sayAt = (fx.sayAt || {})[seat.seat];
@@ -489,6 +508,19 @@
       }
     });
     void world;
+  }
+
+  function drawTether(ctx, from, to, scale) {
+    if (!from || !to) return;
+    ctx.save();
+    ctx.strokeStyle = rgba(AMBER, 0.8);
+    ctx.lineWidth = Math.max(1, 1.2 * scale);
+    ctx.setLineDash([4 * scale, 3 * scale]);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.restore();
   }
 
   function drawToken(ctx, images, L, view, seat, spot, size, index, count) {
