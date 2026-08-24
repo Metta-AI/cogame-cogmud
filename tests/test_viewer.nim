@@ -261,6 +261,12 @@ suite "the renderer draws what the readouts promise":
     ## Including inside the chronicle's verbatim sentences.
     check "nameMap.text(sentence)" in renderer
 
+  test "the closing snapshot reads SETTLED, not WAITING ON 6":
+    let renderer = readRepo("client/renderer.js")
+    ## The last turn frame resets the acts before it is logged, so every seat
+    ## reads `pending` on a turn nobody will act in.
+    check "(state.turnsPlayed || 0) >= total" in renderer
+
   test "the readouts are words and numerals, never internal notation":
     let renderer = readRepo("client/renderer.js")
     check "COIN IN PLAY" in renderer

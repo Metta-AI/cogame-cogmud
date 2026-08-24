@@ -1299,6 +1299,11 @@
     parts.push("TURN " + shown + (total ? " / " + total : ""));
     if (state.gameDone || state.done) {
       parts.push("FINAL");
+    } else if (total && (state.turnsPlayed || 0) >= total) {
+      // The closing snapshot: every act is in and the acts array has been
+      // reset for the log, so `pending` is true for all six even though
+      // nobody is being waited on. It is settled, not waiting.
+      parts.push("SETTLED");
     } else if (state.seats) {
       var waiting = state.seats.filter(function (s) { return s.pending; });
       parts.push(waiting.length ? "WAITING ON " + waiting.length : "SETTLED");
