@@ -5,7 +5,7 @@
 ## scripted episode is a live, per-episode test of the parser: zero unreadable
 ## sentences is the assertion, not a hope.
 
-import std/[json, monotimes, strutils, tables, times, unicode, unittest]
+import std/[json, monotimes, os, strutils, tables, times, unicode, unittest]
 import cogmud/sim
 import cogmud/llm
 
@@ -215,6 +215,40 @@ suite "the no-credentials fallback":
     check turns == 14
     ## No network call and no batch-spacing sleep: well under five seconds.
     check elapsed < 5000
+
+  test "a dead endpoint retries once, falls back, and SAYS it fell back":
+    ## The fallback used to leave no trace on the act event: the server
+    ## computed `scripted` from the seat's configuration alone, so an LLM seat
+    ## that failed twice was recorded as an LLM decision. decideAll now marks
+    ## the seat, and server.nim stamps that onto the event, so a fallback is
+    ## countable from the replay and not only from the stdout log.
+    ##
+    ## The endpoint is 127.0.0.1:9 - discard, always refused - so this drives
+    ## the real transport-failure path without touching the network.
+    putEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "http://127.0.0.1:9")
+    putEnv("AWS_BEARER_TOKEN_BEDROCK", "not-a-token")
+    defer:
+      delEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME")
+      delEnv("AWS_BEARER_TOKEN_BEDROCK")
+    var config = fixtureConfig(seed = 93)
+    config.llmTimeoutSeconds = 5
+    let client = newLlmClient(config)
+    check not client.disabled
+
+    var sim = initSim(config)
+    let seats = sim.pendingSeats()
+    var prompts = newSeq[string](Seats)
+    var scripted = newSeq[ScriptKind](Seats)
+    let started = getMonoTime()
+    let decisions = client.decideAll(sim, seats, prompts, scripted)
+    checkpoint("six refused requests in " &
+      $(getMonoTime() - started).inMilliseconds & "ms")
+    check decisions.len == Seats
+    for index, seat in seats:
+      ## Every seat played, legally, and every seat is marked as a fallback.
+      check decisions[index].sentence.len > 0
+      check client.fellBack[seat]
+      check parseSentence(sim, seat, decisions[index].sentence).kind != iNone
 
 # 4 -------------------------------------------------------------------------
 suite "reply parsing":

@@ -292,7 +292,12 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       withLock stateLock:
         for index, seat in seats:
           let decision = decisions[index]
-          let wasScripted = scripted[seat] != skNone or client.disabled
+          ## True for a baseline seat, for a whole episode with no
+          ## credentials, AND for an LLM seat whose two attempts both failed:
+          ## the act event records what actually decided it, so phase 60 can
+          ## count fallbacks off the replay as well as off the stdout log.
+          let wasScripted = scripted[seat] != skNone or client.disabled or
+            client.fellBack[seat]
           echo "cogmud: turn ", state.sim.turn + 1, " ",
             state.sim.names[seat], ": \"", decision.sentence, "\"",
             (if decision.say.len > 0: " says \"" & decision.say & "\"" else: "")

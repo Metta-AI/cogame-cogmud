@@ -90,6 +90,11 @@ type
     maxOutputTokens: int
     timeoutSeconds: int
     disabled*: bool
+    fellBack*: array[Seats, bool]
+      ## Seats whose LLM decision failed twice on the LAST batch and were
+      ## played by the scripted baseline instead. The server stamps this onto
+      ## the act event's `scripted` flag, so a fallback is visible in the
+      ## replay and the results, not only in the stdout log.
 
 const TunedParams* = BaselineParams(
   ## The winning point of the sweep recorded in docs/tuning/baseline-grid.md.
@@ -690,6 +695,8 @@ proc decideAll*(
   ## go out as ONE parallel batch, because their decisions are simultaneous by
   ## rule — a default episode is 14 batched round trips, not 84.
   result = newSeq[Decision](seats.len)
+  for seat in 0 ..< Seats:
+    client.fellBack[seat] = false
   var open: seq[int]
   for index, seat in seats:
     let kind = scripted[seat]
@@ -731,4 +738,5 @@ proc decideAll*(
   for index in open:
     let seat = seats[index]
     echo "cogmud llm: seat ", seat, " falling back to scripted decision"
+    client.fellBack[seat] = true
     result[index] = scriptedAction(sim, seat, skFactor)
