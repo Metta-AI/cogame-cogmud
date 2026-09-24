@@ -30,6 +30,8 @@ Full rules, the parser and the scoring live in the coworld's own docs pages
 
 ## Layout
 
+Training exports and numeric reinforcement learning: [docs/TRAINING.md](docs/TRAINING.md).
+
 | path | what it is |
 |---|---|
 | `src/cogmud/world.nim` | the authored constant town: nine rooms, six goods, five shopkeepers, the BFS distance matrix, and the `worldJson()` the viewer draws |
