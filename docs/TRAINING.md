@@ -44,3 +44,19 @@ From a Metta checkout with the Coworld training stack, pass absolute
 bridge and manifest paths to `recipes.external.coworld.train` for native
 PufferLib, or `recipes.external.coworld_metta_rl.train` for Metta RL.
 Set `players=6` and choose `standard` or `honest-town`.
+
+## Local training proof
+
+Ten complete episodes per variant exported 672 train and 168 validation
+prompt/action decisions. A one-step Metta post-training optimizer run with
+a 4,096-token context reduced validation loss from 1.75452 to 1.74919
+(standard) and 1.74913 (honest-town). All rows fit the context.
+
+Metta RL ran 512 timesteps per variant through the numeric bridge.
+Native PufferLib trained 4,096 CUDA timesteps per variant. Reloaded
+checkpoints evaluated on held-out seeds 101 and 102 (four games per seed):
+
+| Variant | Seed 101 score / performance | Seed 102 score / performance | Checkpoint SHA-256 |
+| --- | --- | --- | --- |
+| standard | 1.55625 / 0.755339 | 1.91875 / 0.827607 | `2945bfbe05eb034748e50c0677d01ca6bf08eb67d15cbb971fc4df062c1d6e23` |
+| honest-town | 1.55625 / 0.755339 | 1.91875 / 0.827607 | `02a53cbf165c3e1df9a66311e87e51e85de5c56623c1256cff97070d6fd9dd02` |
