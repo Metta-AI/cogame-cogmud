@@ -476,6 +476,27 @@ body.feed-collapsed #feed { display: none; }
    values before the first measurement. */
 :root { --band: 84px; --hudscale: 1; }
 
+/* Playback-speed chips (0.5x / 1x / 2x) that attachReplay inserts into the
+   transport bar beside #play. Same print language as the starter's .tbtn --
+   paper on stage, amber underline on the active chip -- but a size down, so
+   the row reads as a modifier of the play button rather than a peer of it.
+   Defined here, below the banner: .tbtn itself is the starter's and
+   tests/test_viewer.nim byte-pins every rule above. */
+.tspeed { display: flex; gap: 2px; }
+.tchip {
+  font-family: var(--pixfont);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--paper-dim);
+  background: rgba(242, 232, 216, 0.08);
+  border: none;
+  padding: 4px 7px;
+  cursor: pointer;
+  line-height: 1;
+}
+.tchip:hover { background: rgba(242, 232, 216, 0.2); }
+.tchip.on { color: var(--amber); box-shadow: inset 0 -2px 0 var(--amber); }
+
 /* Six seats, not four. */
 #scorebug { grid-template-columns: repeat(6, 1fr); }
 .seat5 { --tc: var(--orange); }
