@@ -1,4 +1,5 @@
-## JSONL numeric bridge over the native Cogmud simulator.
+import cogmud/prompts
+## Numeric choices or hosted sentence actions over the native simulator.
 
 import std/[hashes, json, os]
 import cogmud/[sim, llm]
@@ -9,6 +10,9 @@ var
   cursor: int
   decisionId: int
   choices: array[Seats, int]
+  proposals: array[Seats, Decision]
+  selection: PromptSelection
+  languageMode: bool
   manifestPath: string
   variant: string
 
@@ -19,9 +23,9 @@ proc itemIndex(name: string): int =
 
 proc currentDecision(): JsonNode =
   let seat = seats[cursor]
-  let system = systemPrompt(game, seat)
+  let system = systemPrompt(game, seat, selection)
   let user = userPrompt(game, seat, "")
-  %*{"kind": "decision", "game": "cogmud",
+  result = %*{"kind": "decision", "game": "cogmud",
     "decision_id": decisionId, "seat": seat, "engine_seat": seat,
     "turn": game.turn,
     "semantic_view": {"system": system, "user": user},
@@ -33,8 +37,24 @@ proc currentDecision(): JsonNode =
       "choice": {"type": "integer", "minimum": 0, "maximum": 1}},
       "required": ["choice"]}, "typed_question": newJNull()}
 
+  if languageMode:
+    result["inference_mode"] = %"text_action"
+    result["semantic_view"] = game.playerStateJson(seat)
+    result["semantic_view"]["prompt_template"] = selection.promptMetadata(system, user)
+    result["action_schema"] = %*{"type": "object", "required": ["action"],
+      "properties": {"action": {"type": "string"}, "say": {"type": "string"},
+        "notes": {"type": "string"}}}
+
 proc reset(command: JsonNode): JsonNode =
   doAssert command["players"].getInt() == Seats
+  selection = promptSelection(command)
+  let split = if command.hasKey("split"): command["split"].getStr() else: "train"
+  if split notin ["train", "validation", "test"]:
+    raise newException(ValueError, "split must be train, validation, or test")
+  if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference} and split == "train":
+    raise newException(ValueError, "held-out prompt variants are evaluation-only")
+  if not languageMode and selection.variant != pvCanonical:
+    raise newException(ValueError, "prompt variation requires --language")
   let manifest = parseFile(manifestPath)
   var variantConfig = newJNull()
   for entry in manifest["variants"]:
@@ -53,6 +73,7 @@ proc reset(command: JsonNode): JsonNode =
   currentDecision()
 
 proc encode(): JsonNode =
+  doAssert not languageMode
   let seat = seats[cursor]
   let view = game.playerStateJson(seat)
   var values = newJArray()
@@ -109,16 +130,24 @@ proc step(command: JsonNode): JsonNode =
   if command["decision_id"].getInt() != decisionId:
     return %*{"kind": "rejected", "reason": "stale decision"}
   let action = parseJson(command["response"].getStr())
-  let choice = action["choice"].getInt()
-  doAssert choice in 0 .. 1
-  choices[seats[cursor]] = choice
+  var accepted = action
+  if languageMode:
+    proposals[seats[cursor]] = parseDecision(action)
+    accepted = proposals[seats[cursor]].decisionReply()
+  else:
+    let choice = action["choice"].getInt()
+    doAssert choice in 0 .. 1
+    choices[seats[cursor]] = choice
   inc decisionId
   inc cursor
   if cursor == seats.len:
     var decisions: array[Seats, Decision]
     for seat in seats:
-      let kind = if choices[seat] == 0: skFactor else: skMagpie
-      decisions[seat] = scriptedAction(game, seat, kind)
+      if languageMode:
+        decisions[seat] = proposals[seat]
+      else:
+        let kind = if choices[seat] == 0: skFactor else: skMagpie
+        decisions[seat] = scriptedAction(game, seat, kind)
     for seat in seats:
       let decision = decisions[seat]
       game.applyAction(seat, decision.sentence, decision.say,
@@ -135,12 +164,14 @@ proc step(command: JsonNode): JsonNode =
     %*{"kind": "terminal", "scores": scores,
       "utilities": utilities}
   else: currentDecision()
-  %*{"kind": "accepted", "action": action, "observation": observation}
+  %*{"kind": "accepted", "action": accepted, "observation": observation}
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len != 2:
-    quit("usage: cogmud-train-bridge MANIFEST VARIANT", 1)
+  if args.len notin [2, 3]:
+    quit("usage: cogmud-train-bridge MANIFEST VARIANT [--language]", 1)
+  languageMode = args.len == 3
+  if languageMode: doAssert args[2] == "--language"
   manifestPath = absolutePath(args[0])
   variant = args[1]
   doAssert variant in ["standard", "honest-town"]
@@ -149,7 +180,10 @@ when isMainModule:
     let response = case command["kind"].getStr()
       of "reset": reset(command)
       of "encode": encode()
-      of "teacher": %*{"response": $(%*{"choice": 0})}
+      of "teacher":
+        if languageMode:
+          %*{"response": $scriptedAction(game, seats[cursor], skFactor).decisionReply()}
+        else: %*{"response": $(%*{"choice": 0})}
       of "step": step(command)
       else: raise newException(ValueError, "unknown command")
     stdout.writeLine($response)
