@@ -1,3 +1,5 @@
+import bitworld/decision_trajectory
+import cogmud/prompts
 ## Bounded-orders / legality assertion on the two scripted baselines, plus the
 ## no-credentials fallback and the reply parser.
 ##
@@ -202,7 +204,8 @@ suite "the no-credentials fallback":
       let seats = sim.pendingSeats()
       var prompts = newSeq[string](Seats)
       var scripted = newSeq[ScriptKind](Seats)
-      let decisions = client.decideAll(sim, seats, prompts, scripted)
+      var evidence: seq[seq[DecisionAttempt]]
+      let decisions = client.decideAll(PromptSelection(), sim, seats, prompts, scripted, evidence)
       check decisions.len == Seats
       for index, seat in seats:
         check decisions[index].sentence.len > 0
@@ -240,7 +243,8 @@ suite "the no-credentials fallback":
     var prompts = newSeq[string](Seats)
     var scripted = newSeq[ScriptKind](Seats)
     let started = getMonoTime()
-    let decisions = client.decideAll(sim, seats, prompts, scripted)
+    var evidence: seq[seq[DecisionAttempt]]
+    let decisions = client.decideAll(PromptSelection(), sim, seats, prompts, scripted, evidence)
     checkpoint("six refused requests in " &
       $(getMonoTime() - started).inMilliseconds & "ms")
     check decisions.len == Seats

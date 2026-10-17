@@ -24,9 +24,10 @@
 ## same scripted bots are also fieldable policies.
 
 import
-  std/[json, os, strutils, unicode],
-  bitworld/runtime,
+  std/[json, options, os, strutils, unicode],
+  bitworld/[runtime, decision_trajectory],
   curly,
+  prompts,
   sim
 
 const
@@ -397,11 +398,8 @@ proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind,
 
 # ---- Prompt building --------------------------------------------------------
 
-proc systemPrompt*(sim: Sim, seat: int): string =
-  "You are " & sim.names[seat] & ", one of six cogs loose in the town of " &
-  "Coppermarch. You act by writing ONE SENTENCE of plain English. There is " &
-  "no menu of moves: write what you do, and the town works out whether it " &
-  "happened." & """
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
+  selection.introduction(sim.names[seat]) & """
 
 Rules:
 - Each turn you do exactly ONE thing. The town understands: going somewhere,
@@ -697,12 +695,21 @@ proc parseDecision*(payload: JsonNode): Decision =
   result.say = cleanText(payload{"say"}.getStr(), MaxSayLen)
   result.notes = cleanText(payload{"notes"}.getStr(), MaxNotesLen)
 
+proc decisionReply*(decision: Decision): JsonNode =
+  %*{"action": decision.sentence, "say": decision.say, "notes": decision.notes}
+
+proc executedReply*(event: GameEvent): JsonNode =
+  doAssert event.kind == evAct
+  %*{"action": event.sentence, "say": event.say, "notes": event.text}
+
 proc decideAll*(
   client: LlmClient,
+  selection: PromptSelection,
   sim: Sim,
   seats: seq[int],
   prompts: seq[string],
-  scripted: seq[ScriptKind]
+  scripted: seq[ScriptKind],
+  evidence: var seq[seq[DecisionAttempt]]
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order. Never raises: any failure
   ## falls back to the scripted baseline so the episode always advances.
@@ -710,6 +717,7 @@ proc decideAll*(
   ## go out as ONE parallel batch, because their decisions are simultaneous by
   ## rule — a default episode is 14 batched round trips, not 84.
   result = newSeq[Decision](seats.len)
+  evidence = newSeq[seq[DecisionAttempt]](seats.len)
   for seat in 0 ..< Seats:
     client.fellBack[seat] = false
   var open: seq[int]
@@ -718,6 +726,16 @@ proc decideAll*(
     if kind != skNone or client.disabled:
       result[index] = scriptedAction(sim, seat,
         (if kind == skNone: skFactor else: kind))
+      var entry = newDecisionAttempt("scripted", "scripted-" &
+        $(if kind == skNone: skFactor else: kind),
+        if kind == skNone: aoFallback else: aoTeacher)
+      entry.parsedAction = decisionReply(result[index])
+      entry.accepted = true
+      if kind != skNone:
+        entry.prompt = %*[{"role": "system", "content": systemPrompt(sim, seat, selection)},
+          {"role": "user", "content": userPrompt(sim, seat, prompts[seat])}]
+        entry.response = %($entry.parsedAction)
+      evidence[index].add(entry)
     else:
       open.add(index)
   for attempt in 0 .. 1:
@@ -730,7 +748,15 @@ proc decideAll*(
       if attempt > 0:
         user.add("\nYour previous reply was invalid. Respond with ONLY the " &
           "requested JSON object.")
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let system = systemPrompt(sim, seat, selection)
+      let request = client.requestFor(system, user, seat)
+      var entry = newDecisionAttempt("model-" & $attempt, "model", aoModel)
+      entry.prompt = %*[{"role": "system", "content": system},
+        {"role": "user", "content": user}]
+      entry.request = parseJson(request.body)
+      entry.model = some(if client.transport == ltBedrock:
+        client.bedrockModels[client.bedrockModel] else: client.model)
+      evidence[index].add(entry)
       batch.post(request.url, request.headers, request.body, $index)
     ## The retry batch gets half the budget, floored at 8 s, so the worst case
     ## for a turn is llmTimeoutSeconds + max(8, llmTimeoutSeconds div 2).
@@ -741,11 +767,17 @@ proc decideAll*(
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      if responses[position].response.body.len > 0:
+        evidence[index][^1].rawResponse = %responses[position].response.body
       try:
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
+        evidence[index][^1].response = %text
         result[index] = parseDecision(extractJsonObject(text))
+        evidence[index][^1].parsedAction = decisionReply(result[index])
+        evidence[index][^1].accepted = true
       except CatchableError as error:
+        evidence[index][^1].rejectionReason = some(error.msg)
         echo "cogmud llm: seat ", seat, " attempt ", attempt, " failed: ",
           error.msg
         stillOpen.add(index)
@@ -755,3 +787,7 @@ proc decideAll*(
     echo "cogmud llm: seat ", seat, " falling back to scripted decision"
     client.fellBack[seat] = true
     result[index] = scriptedAction(sim, seat, skFactor)
+    var entry = newDecisionAttempt("fallback", "scripted-factor", aoFallback)
+    entry.parsedAction = decisionReply(result[index])
+    entry.accepted = true
+    evidence[index].add(entry)

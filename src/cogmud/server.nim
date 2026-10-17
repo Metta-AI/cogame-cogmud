@@ -22,12 +22,13 @@
 ##                   that seat: "factor" / "1", or "magpie")
 
 import
-  std/[json, locks, os, sets, strutils, tables, times, unicode],
-  bitworld/runtime,
+  std/[json, locks, options, os, sets, strutils, tables, times, unicode],
+  bitworld/[runtime, decision_trajectory],
   curly,
   mummy,
   mummy/routers,
   llm,
+  prompts,
   sim
 
 const ReplayVersion = 1
@@ -35,6 +36,8 @@ const ReplayVersion = 1
 type
   GameState = object
     config: GameConfig
+    selection: PromptSelection
+    trajectory: Option[DecisionTrajectory]
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
@@ -160,6 +163,14 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     grace = state.config.shutdownGraceSeconds
     results = state.sim.resultsJson()
     replayData = state.replayPayload(results)
+    if state.trajectory.isSome:
+      var outcomes = newJObject()
+      for seat in 0 ..< Seats:
+        outcomes[$seat] = %*{"score": results["scores"][seat]}
+      state.trajectory.get().finish(
+        if state.sim.turnsPlayed == state.config.turns: esCompleted else: esTruncated,
+        results, outcomes)
+      state.trajectory.get().writeEventsToUri(getEnv(CogameSaveTrajectoryUriEnv))
 
     ## Send final frames to players BEFORE writing artifacts: the hosted worker
     ## tears player pods down as soon as results.json exists, and writing first
@@ -287,9 +298,12 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (Claude, ONE parallel batch for the turn) runs outside
       ## the lock on a snapshot; only this thread mutates the sim, so the
       ## snapshot cannot go stale.
-      let decisions = client.decideAll(simCopy, seats, prompts, scripted)
+      var evidence: seq[seq[DecisionAttempt]]
+      let decisions = client.decideAll(state.selection, simCopy, seats, prompts, scripted, evidence)
 
       withLock stateLock:
+        let firstEvent = state.sim.events.len
+        var rejections: array[Seats, string]
         for index, seat in seats:
           let decision = decisions[index]
           ## True for a baseline seat, for a whole episode with no
@@ -305,6 +319,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             state.sim.applyAction(seat, decision.sentence, decision.say,
               decision.notes, wasScripted)
           except CogmudError as error:
+            rejections[seat] = error.msg
             ## Unreachable after the parser's pre-checks; a belt-and-braces
             ## guard, as in bullwhip's server.
             echo "cogmud: action rejected (", error.msg, "); waiting instead"
@@ -313,6 +328,45 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
                 true)
             except CogmudError:
               discard
+        if state.trajectory.isSome:
+          var recorded = 0
+          for eventIndex in firstEvent ..< state.sim.events.len:
+            let event = state.sim.events[eventIndex]
+            if event.kind != evAct:
+              continue
+            let seat = event.seat
+            let index = seats.find(seat)
+            doAssert index >= 0
+            let executed = executedReply(event)
+            var attempts = evidence[index]
+            var selected = none(string)
+            var status = asFallback
+            var fallback = some("scripted-factor")
+            var promptAttempts = newJArray()
+            for entry in attempts.mitems:
+              if entry.accepted and (rejections[seat].len > 0 or
+                  event.reason notin {oOk, oWaited} or entry.parsedAction != executed):
+                let why = if rejections[seat].len > 0: rejections[seat]
+                  elif event.reason notin {oOk, oWaited}: "town-" & $event.reason
+                  else: "engine-normalized-submission"
+                entry.accepted = false
+                entry.rejectionReason = some(why)
+                fallback = some(why)
+              if entry.accepted and entry.origin != aoFallback:
+                selected = some(entry.attemptId)
+                status = asAccepted
+                fallback = none(string)
+              if entry.origin in {aoModel, aoTeacher}:
+                promptAttempts.add(%*{"attempt_id": entry.attemptId,
+                  "prompt_template": state.selection.promptMetadata(
+                    entry.prompt[0]["content"].getStr(), entry.prompt[1]["content"].getStr())})
+            var observation = simCopy.playerStateJson(seat)
+            observation["prompt_selection"] = state.selection.selectionMetadata()
+            observation["prompt_attempts"] = promptAttempts
+            state.trajectory.get().recordDecision($eventIndex, $seat, observation,
+              attempts, selected, executed, status, fallbackOrigin = fallback)
+            inc recorded
+          doAssert recorded == seats.len
         state.broadcastLocked()
 
       ## Pace between turns so spectators can read the town.
@@ -520,7 +574,13 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   if config.tokens.len != config.players.len:
     raise newException(CogmudError, "tokens and players must align")
   state.config = config
+  state.selection = promptSelection(parseJson(
+    if runtimeConfig.config.len > 0: runtimeConfig.config else: "{}"))
   state.sim = initSim(config)
+  if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
+    state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
+      "cogmud-" & $config.seed, "cogmud", getEnv("COWORLD_GAME_VERSION"),
+      getEnv("COWORLD_SOURCE_REVISION")))
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
   runtimeConfigGlobal = runtimeConfig

@@ -1,18 +1,27 @@
-## Complete native town episodes with hosted prompts and parsed sentences.
-
-import std/[json, os, osproc, strutils]
-import cogmud/[sim, llm]
+## Export complete engine-resolved episodes as private candidate evidence.
+import std/[json, options, os, osproc, strutils]
+import bitworld/decision_trajectory
+import cogmud/[sim, llm, prompts]
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len != 3:
-    quit("usage: cogmud-posttrain OUTPUT EPISODES VARIANT", 1)
+  if args.len notin [3, 5]:
+    quit("usage: cogmud-posttrain OUTPUT EPISODES VARIANT [PROMPT_VARIANT PROMPT_SEED]", 1)
   let output = args[0]
   let episodes = parseInt(args[1])
   let variant = args[2]
-  if episodes < 10: quit("at least ten games are required", 1)
-  if dirExists(output) or fileExists(output):
-    quit("output already exists: " & output, 1)
+  let selection = promptSelection(if args.len == 5:
+    %*{"promptVariant": args[3], "promptSeed": parseInt(args[4])} else: newJObject())
+  if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+    raise newException(ValueError, "held-out prompt variants are evaluation-only")
+  doAssert episodes >= 10
+  doAssert not dirExists(output) and not fileExists(output)
+  let status = execCmdEx("git status --porcelain")
+  doAssert status.exitCode == 0 and status.output.strip().len == 0,
+    "Commit the qualified source before generating a pinned training corpus"
+  let head = execCmdEx("git rev-parse HEAD")
+  doAssert head.exitCode == 0
+  let revision = head.output.strip()
   let manifest = parseFile("coworld_manifest_template.json")
   var variantConfig = newJNull()
   for entry in manifest["variants"]:
@@ -20,60 +29,83 @@ when isMainModule:
       variantConfig = copy(entry["game_config"])
   doAssert variantConfig.kind == JObject
   createDir(output)
-  let revision = execProcess("git rev-parse HEAD").strip()
+  setFilePermissions(output, {fpUserRead, fpUserWrite, fpUserExec})
   var
-    trainRows: seq[string]
-    validationRows: seq[string]
     runs = newJArray()
-  for seed in 1 .. episodes:
-    variantConfig["seed"] = %seed
-    var config = defaultGameConfig()
-    config.update($variantConfig)
-    config = config.sampleEpisode()
-    var game = initSim(config)
-    var rows: seq[string]
-    while not game.done:
-      var decisions: array[Seats, Decision]
-      let seats = game.pendingSeats()
-      for seat in seats:
-        let kind = if (seed + game.turn + seat) mod 2 == 0:
-          skFactor else: skMagpie
-        let decision = scriptedAction(game, seat, kind)
-        let completion = %*{"action": decision.sentence,
-          "say": decision.say, "notes": decision.notes}
-        let accepted = parseDecision(completion)
-        doAssert accepted.sentence == decision.sentence
-        doAssert parseSentence(game, seat, accepted.sentence).kind != iNone
-        decisions[seat] = accepted
-        rows.add($(%*{
-          "episode_id": "cogmud-" & variant & "-" & $seed,
-          "seed": "cogmud-" & variant & "-" & $seed,
-          "decision_id": rows.len,
-          "prompt": [
-            {"role": "system", "content": systemPrompt(game, seat)},
-            {"role": "user", "content": userPrompt(game, seat, "")}
-          ],
-          "completion": [{"role": "assistant", "content": $completion}],
-          "game": "cogmud",
-          "action_schema_revision": "cogmud-sentence-v1"
-        }))
-      for seat in seats:
-        let decision = decisions[seat]
-        game.applyAction(seat, decision.sentence, decision.say,
-          decision.notes, true)
-    let results = game.resultsJson()
-    doAssert game.turnsPlayed == config.turns
-    if seed mod 5 == 0: validationRows.add(rows)
-    else: trainRows.add(rows)
-    runs.add(%*{"seed": seed, "turns": game.turnsPlayed,
-      "decisions": rows.len, "scores": results["scores"],
-      "reason": results["reason"]})
-  writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
-  writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
-  writeFile(output / "manifest.json", pretty(%*{
+  writePrivate(output / "trajectories.jsonl", "")
+  let stream = open(output / "trajectories.jsonl", fmAppend)
+  try:
+    for seed in 1 .. episodes:
+      variantConfig["seed"] = %seed
+      var config = defaultGameConfig()
+      config.update($variantConfig)
+      config = sampleEpisode(config)
+      var game = initSim(config)
+      let family = "cogmud-" & $seed
+      let episodeId = family & "-" & variant & "-" &
+        $selection.selectedVariant & "-" & $selection.seed
+      let trajectory = newDecisionTrajectory(episodeId, family, "cogmud",
+        "source-" & revision, revision)
+      var decisionId = 0
+      while not game.done:
+        let snapshot = game
+        let seats = game.pendingSeats()
+        var decisions: array[Seats, Decision]
+        var kinds: array[Seats, ScriptKind]
+        for seat in seats:
+          kinds[seat] = if (seed + game.turn + seat) mod 2 == 0: skFactor else: skMagpie
+          decisions[seat] = parseDecision(scriptedAction(snapshot, seat, kinds[seat]).decisionReply())
+          doAssert parseSentence(snapshot, seat, decisions[seat].sentence).kind != iNone
+        let firstEvent = game.events.len
+        for seat in seats:
+          let decision = decisions[seat]
+          game.applyAction(seat, decision.sentence, decision.say, decision.notes, true)
+        var recorded = 0
+        for eventIndex in firstEvent ..< game.events.len:
+          let event = game.events[eventIndex]
+          if event.kind != evAct:
+            continue
+          let seat = event.seat
+          let reply = decisions[seat].decisionReply()
+          let executed = executedReply(event)
+          let system = systemPrompt(snapshot, seat, selection)
+          let user = userPrompt(snapshot, seat, "")
+          var observation = snapshot.playerStateJson(seat)
+          observation["prompt_template"] = selection.promptMetadata(system, user)
+          var attempt = newDecisionAttempt($decisionId & "-teacher",
+            "scripted-" & $kinds[seat], aoTeacher)
+          attempt.prompt = %*[{"role": "system", "content": system},
+            {"role": "user", "content": user}]
+          attempt.parsedAction = reply
+          attempt.response = %($reply)
+          attempt.accepted = event.reason in {oOk, oWaited} and reply == executed
+          let rejection = if event.reason notin {oOk, oWaited}: "town-" & $event.reason
+            else: "engine-normalized-submission"
+          if not attempt.accepted:
+            attempt.rejectionReason = some(rejection)
+          trajectory.recordDecision($decisionId, $seat, observation, @[attempt],
+            if attempt.accepted: some(attempt.attemptId) else: none(string),
+            executed, if attempt.accepted: asAccepted else: asFallback,
+            game.done and recorded == seats.high,
+            if attempt.accepted: none(string) else: some(rejection))
+          inc recorded
+          inc decisionId
+        doAssert recorded == seats.len
+      doAssert game.reason == "complete" and game.turnsPlayed == config.turns
+      let results = game.resultsJson()
+      var participants = newJObject()
+      for seat in 0 ..< config.players.len:
+        participants[$seat] = %*{"score": results["scores"][seat]}
+      trajectory.finish(esCompleted, results, participants)
+      stream.write(trajectory.eventsJsonl())
+      runs.add(%*{"seed": seed, "turns": game.turnsPlayed, "reason": game.reason,
+        "decisions": decisionId, "scores": results["scores"]})
+  finally:
+    stream.close()
+  writePrivate(output / "manifest.json", pretty(%*{
     "schema_version": 1, "game": "cogmud", "variant": variant,
     "source_revision": revision, "teacher": "factor-and-magpie",
-    "train_examples": trainRows.len,
-    "validation_examples": validationRows.len, "runs": runs
-  }) & "\n")
-  echo "train=", trainRows.len, " validation=", validationRows.len
+    "prompt_selection": selection.selectionMetadata(),
+    "split_authority": "shared Coworld SDK and application importer by seed_family",
+    "runs": runs}) & "\n")
+  echo "complete games=", episodes

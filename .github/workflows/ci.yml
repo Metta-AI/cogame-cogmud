@@ -42,7 +42,7 @@ jobs:
   # ---------------------------------------------------------------------
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
 
@@ -157,6 +157,16 @@ jobs:
             -o:/tmp/cogmud-train-bridge tools/train_bridge.nim
           python3 tools/test_training.py /tmp/cogmud-posttrain \
             /tmp/cogmud-train-bridge
+
+      - name: Check full prompt variants and native private evidence
+        run: |
+          set -euo pipefail
+          python3 tools/test_prompt_variants.py /tmp/cogmud-train-bridge
+          nim c -d:release --threads:on --path:src -o:/tmp/cogmud-game src/cogmud.nim
+          nim c -d:release --threads:on --path:src -o:/tmp/cogmud-player src/cogmud_player.nim
+          python3 tools/test_prompt_native_games.py /tmp/cogmud-game \
+            /tmp/cogmud-player "${RUNNER_TEMP}/cogmud-prompts" "$(git rev-parse HEAD)"
+
 
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs
