@@ -17,48 +17,51 @@ with tempfile.TemporaryDirectory() as directory:
     for variant in ("standard", "honest-town"):
         output = Path(directory) / variant
         subprocess.run(
-            [str(EXPORTER), str(output), "10", variant], cwd=ROOT, check=True
+            [str(EXPORTER), str(output), "10", variant, "mixed", "0"],
+            cwd=ROOT,
+            check=True,
         )
         manifest = json.loads((output / "manifest.json").read_text())
-        source = output / "trajectories.jsonl"
-        episodes, decisions = [], 0
-        assert source.stat().st_mode & 0o777 == 0o600
-        assert not (output / "train.jsonl").exists()
-        assert not (output / "validation.jsonl").exists()
-        with source.open() as stream:
-            for line in stream:
-                row = json.loads(line)
-                assert row["source_revision"] == manifest["source_revision"]
-                if row["event_type"] == "episode":
-                    episodes.append(row)
-                    continue
-                decisions += 1
-                (attempt,) = row["attempts"]
-                assert attempt["origin"] == "teacher"
-                assert attempt["policy"] in ("scripted-factor", "scripted-magpie")
-                system, user = (part["content"] for part in attempt["prompt"])
-                assert "OUTPUT FORMAT" in system and len(user) > 100
-                reply = json.loads(attempt["response"])
-                assert reply == attempt["parsed_action"]
-                assert set(reply) == {"action", "say", "notes"} and reply["action"]
-                if row["action_status"] == "accepted":
-                    assert attempt["accepted"] and row["executed_action"] == reply
-                else:
-                    assert (
-                        not attempt["accepted"] and row["selected_attempt_id"] is None
-                    )
-                    assert row["fallback_origin"].startswith("town-") or (
-                        row["fallback_origin"] == "engine-normalized-submission"
-                    )
-        assert len(episodes) == len(manifest["runs"]) == 10
-        assert decisions == 840
+        train = [
+            json.loads(line)
+            for line in (output / "train.jsonl").read_text().splitlines()
+        ]
+        validation = [
+            json.loads(line)
+            for line in (output / "validation.jsonl").read_text().splitlines()
+        ]
+        assert len(manifest["runs"]) == 10
         assert all(
-            run["turns"] == 14 and run["decisions"] == 84 for run in manifest["runs"]
+            run["turns"] == 14 and run["decisions"] + run["rejected_proposals"] == 84
+            for run in manifest["runs"]
         )
-        assert {row["seed_family"] for row in episodes} == {
-            f"cogmud-{seed}" for seed in range(1, 11)
-        }
-        assert all(row["status"] == "completed" for row in episodes)
+        assert (
+            len(train)
+            == manifest["train_examples"]
+            == sum(run["decisions"] for run in manifest["runs"] if run["seed"] % 5 != 0)
+        )
+        assert (
+            len(validation)
+            == manifest["validation_examples"]
+            == sum(run["decisions"] for run in manifest["runs"] if run["seed"] % 5 == 0)
+        )
+        assert [run["prompt_selection"]["variant"] for run in manifest["runs"]] == [
+            "canonical",
+            "plain",
+            "numbered",
+            "questions",
+            "reordered",
+        ] * 2
+        assert {row["seed"] for row in train}.isdisjoint(
+            row["seed"] for row in validation
+        )
+        for row in train + validation:
+            system, user = (part["content"] for part in row["prompt"])
+            assert "OUTPUT FORMAT" in system
+            assert len(user) > 100
+            reply = json.loads(row["completion"][0]["content"])
+            assert set(reply) == {"action", "say", "notes"}
+            assert reply["action"]
 
         for teacher in (True, False):
             process = subprocess.Popen(
