@@ -39,7 +39,7 @@ when isMainModule:
       selection.seed += wordingCounts[partition]
     inc wordingCounts[partition]
     let episode = "cogmud-" & variant & "-" & $seed & "-" &
-      $selection.selectedVariant & "-" & $selection.seed
+      $selection.variant & "-" & $selection.selectedVariant & "-" & $selection.seed
     variantConfig["seed"] = %seed
     var config = defaultGameConfig()
     config.update($variantConfig)

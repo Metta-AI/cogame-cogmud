@@ -17,13 +17,9 @@ The other certified variant is `honest-town`. The output has
 seeds, turns, scores, and row counts. Ten episodes yielded 672/168
 train/validation decisions for each variant.
 
-From a Metta checkout with the post-training package installed:
+Use the [post-training research package](https://github.com/Metta-AI/posttraining-research/tree/main/packages/metta-posttraining)
+for current training and adapter-packaging workflows.
 
-```sh
-uv run --package metta-posttrain --extra train python -m metta_posttrain.train \
-  --dataset /tmp/cogmud-data --output /tmp/cogmud-adapter \
-  --model Qwen/Qwen3-0.6B --max-steps 100 --max-length 4096
-```
 
 ## Numeric reinforcement learning
 
@@ -86,3 +82,6 @@ The earlier row totals describe exports before this admission filter.
 seven direct wordings and one mixed selection. Existing export/numeric checks
 cover 20 mixed games and verify admission counts and family separation. Scripted
 invariance is not evidence of improved learned-policy robustness.
+
+Episode IDs include requested selection, resolved wording, and prompt seed, so
+matched explicit and mixed collections remain distinct. Scenario families stay unchanged.
