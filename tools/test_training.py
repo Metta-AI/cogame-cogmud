@@ -45,13 +45,17 @@ with tempfile.TemporaryDirectory() as directory:
             == manifest["validation_examples"]
             == sum(run["decisions"] for run in manifest["runs"] if run["seed"] % 5 == 0)
         )
-        assert [run["prompt_selection"]["variant"] for run in manifest["runs"]] == [
+        wordings = {
+            run["episode"]: run["prompt_selection"]["variant"]
+            for run in manifest["runs"]
+        }
+        assert {wordings[row["episode_id"]] for row in train} == {
             "canonical",
             "plain",
             "numbered",
             "questions",
             "reordered",
-        ] * 2
+        }
         assert {row["seed"] for row in train}.isdisjoint(
             row["seed"] for row in validation
         )
