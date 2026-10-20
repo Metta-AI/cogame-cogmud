@@ -28,6 +28,7 @@ import
   mummy,
   mummy/routers,
   llm,
+  prompts,
   sim
 
 const ReplayVersion = 1
@@ -35,6 +36,7 @@ const ReplayVersion = 1
 type
   GameState = object
     config: GameConfig
+    selection: PromptSelection
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
@@ -287,7 +289,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (Claude, ONE parallel batch for the turn) runs outside
       ## the lock on a snapshot; only this thread mutates the sim, so the
       ## snapshot cannot go stale.
-      let decisions = client.decideAll(simCopy, seats, prompts, scripted)
+      let decisions = client.decideAll(state.selection, simCopy, seats, prompts, scripted)
 
       withLock stateLock:
         for index, seat in seats:
@@ -520,6 +522,8 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   if config.tokens.len != config.players.len:
     raise newException(CogmudError, "tokens and players must align")
   state.config = config
+  state.selection = promptSelection(parseJson(
+    if runtimeConfig.config.len > 0: runtimeConfig.config else: "{}"))
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)

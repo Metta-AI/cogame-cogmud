@@ -27,6 +27,7 @@ import
   std/[json, os, strutils, unicode],
   bitworld/runtime,
   curly,
+  prompts,
   sim
 
 const
@@ -397,26 +398,11 @@ proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind,
 
 # ---- Prompt building --------------------------------------------------------
 
-proc systemPrompt*(sim: Sim, seat: int): string =
-  "You are " & sim.names[seat] & ", one of six cogs loose in the town of " &
-  "Coppermarch. You act by writing ONE SENTENCE of plain English. There is " &
-  "no menu of moves: write what you do, and the town works out whether it " &
-  "happened." & """
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
+  selection.introduction(sim.names[seat]) & """
 
 Rules:
-- Each turn you do exactly ONE thing. The town understands: going somewhere,
-  taking or dropping something lying on the ground, buying from or selling to a
-  shopkeeper standing in your room, handing goods to a shopkeeper, offering
-  another cog a trade, accepting an offer made to you last turn, hiring another
-  cog, robbing another cog, asking a shopkeeper about your commissions,
-  speaking, or waiting. Write it however you like; name the thing, the place or
-  the cog plainly.
-- If the town cannot read your sentence, you lose the turn and are told exactly
-  why. Nothing else punishes you for it.
-- You may act only on what is in the room you are standing in. You never see
-  any other room, and you never see what another cog is carrying or how much
-  coin it has.
-- Prices move. A shopkeeper charges more for what it is short of and pays about
+""" & selection.actionBriefing() & """- Prices move. A shopkeeper charges more for what it is short of and pays about
   two thirds of what it charges. It only buys goods it already deals in, and it
   runs out of coin.
 - You hold two COMMISSIONS. Guildmaster Vell at the Guildhall settles every
@@ -435,11 +421,7 @@ Rules:
 - Your SCORE at the end is your coins, plus the fixed value of everything you
   are carrying, plus 3 for every commission point. Nothing else scores you. You
   start on 40 coins and a score of zero.
-- Anything you say aloud is heard by every cog in your room, next turn. It need
-  not be true.
-- Your notes are private to you and fed back to you every turn.
-
-OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis, no
+""" & selection.memoryBriefing() & """OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis, no
 explanation, no markdown fences, no text before or after the object. Your reply
 must begin with the character { and end with }."""
 
@@ -697,8 +679,16 @@ proc parseDecision*(payload: JsonNode): Decision =
   result.say = cleanText(payload{"say"}.getStr(), MaxSayLen)
   result.notes = cleanText(payload{"notes"}.getStr(), MaxNotesLen)
 
+proc decisionReply*(decision: Decision): JsonNode =
+  %*{"action": decision.sentence, "say": decision.say, "notes": decision.notes}
+
+proc executedReply*(event: GameEvent): JsonNode =
+  doAssert event.kind == evAct
+  %*{"action": event.sentence, "say": event.say, "notes": event.text}
+
 proc decideAll*(
   client: LlmClient,
+  selection: PromptSelection,
   sim: Sim,
   seats: seq[int],
   prompts: seq[string],
@@ -730,7 +720,7 @@ proc decideAll*(
       if attempt > 0:
         user.add("\nYour previous reply was invalid. Respond with ONLY the " &
           "requested JSON object.")
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
       batch.post(request.url, request.headers, request.body, $index)
     ## The retry batch gets half the budget, floored at 8 s, so the worst case
     ## for a turn is llmTimeoutSeconds + max(8, llmTimeoutSeconds div 2).
