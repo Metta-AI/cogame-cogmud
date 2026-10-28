@@ -162,7 +162,7 @@ def run(game, player, output, variant, capture, model_enabled=True):
                 assert not row["observation"]["done"]
                 action = {
                     "action": event["sentence"],
-                    "say": event["say"],
+                    "say": event.get("say", ""),
                     "notes": event.get("text", ""),
                 }
                 assert action == row["executed_action"]
