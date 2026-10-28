@@ -24,11 +24,12 @@
 ## same scripted bots are also fieldable policies.
 
 import
-  std/[json, os, strutils, unicode],
+  std/[json, options, os, strutils, times, unicode],
   bitworld/runtime,
   curly,
   prompts,
-  sim
+  sim,
+  training
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -98,6 +99,7 @@ type
       ## played by the scripted baseline instead. The server stamps this onto
       ## the act event's `scripted` flag, so a fallback is visible in the
       ## replay and the results, not only in the stdout log.
+    nativeAttempts*: seq[seq[DecisionAttempt]]
 
 const TunedParams* = BaselineParams(
   ## The winning point of the sweep recorded in docs/tuning/baseline-grid.md.
@@ -700,6 +702,8 @@ proc decideAll*(
   ## go out as ONE parallel batch, because their decisions are simultaneous by
   ## rule — a default episode is 14 batched round trips, not 84.
   result = newSeq[Decision](seats.len)
+  let capture = getEnv(CogameSaveTrajectoryUriEnv).len > 0
+  if capture: client.nativeAttempts = newSeq[seq[DecisionAttempt]](Seats)
   for seat in 0 ..< Seats:
     client.fellBack[seat] = false
   var open: seq[int]
@@ -713,7 +717,9 @@ proc decideAll*(
   for attempt in 0 .. 1:
     if open.len == 0 or client.disabled:
       break
+    let started = epochTime()
     var batch: RequestBatch
+    var pendingEvidence: seq[DecisionAttempt]
     for index in open:
       let seat = seats[index]
       var user = sim.userPrompt(seat, prompts[seat])
@@ -721,6 +727,9 @@ proc decideAll*(
         user.add("\nYour previous reply was invalid. Respond with ONLY the " &
           "requested JSON object.")
       let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
+      if capture:
+        pendingEvidence.add(nativeAttempt(sim.config.players[seat].name,
+          sim.events.len, seat, attempt, request.body))
       batch.post(request.url, request.headers, request.body, $index)
     ## The retry batch gets half the budget, floored at 8 s, so the worst case
     ## for a turn is llmTimeoutSeconds + max(8, llmTimeoutSeconds div 2).
@@ -728,17 +737,34 @@ proc decideAll*(
       if attempt == 0: client.timeoutSeconds
       else: max(8, client.timeoutSeconds div 2)
     let responses = client.curl.makeRequests(batch, budget)
+    let latency = int((epochTime() - started) * 1000.0)
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      var evidence: DecisionAttempt
+      if capture: evidence = pendingEvidence[position]
       try:
+        if capture:
+          evidence.receiveNativeResponse(responses[position].response,
+            responses[position].error, latency)
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        result[index] = parseDecision(extractJsonObject(text))
+        let payload = extractJsonObject(text)
+        result[index] = parseDecision(payload)
+        if capture:
+          evidence.parsedAction = result[index].decisionReply()
+          var candidate = copy(payload)
+          for key in ["say", "notes"]:
+            if not candidate.hasKey(key): candidate[key] = %""
+          evidence.accepted = candidate == evidence.parsedAction
+          if not evidence.accepted:
+            evidence.rejectionReason = some("native parser normalized the proposal")
       except CatchableError as error:
+        if capture: evidence.rejectionReason = some(error.msg)
         echo "cogmud llm: seat ", seat, " attempt ", attempt, " failed: ",
           error.msg
         stillOpen.add(index)
+      if capture: client.nativeAttempts[seat].add(evidence)
     open = stillOpen
   for index in open:
     let seat = seats[index]

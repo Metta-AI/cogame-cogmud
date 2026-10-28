@@ -1,5 +1,43 @@
 # Cogmud training
 
+## Authentic hosted model traces
+
+The ordinary game server can write a private JSONL decision artifact when
+`COGAME_SAVE_TRAJECTORY_URI` is set. Capture preserves the six-seat parallel
+requests, native retry/fallback behavior, 12-second batch floor, and all fourteen
+turns. Each request retains the exact prompt, decoder settings, received response,
+platform call ID, and available usage/identity fields. Missing usage is unknown.
+
+All six private observations are frozen before any submission. After the sixth
+submission resolves the town, each actual act event is joined by seat to its
+original observation and attempts, in the engine's class/initiative order.
+Only unchanged model replies can be selected; optional omitted say/notes fields
+use their native empty defaults for equality only. Parser or engine normalization
+excludes selection without changing the stored response. Scripted and offline
+fallbacks cannot become model teaching targets. Authenticate platform receipts
+with the maintained research collector before training.
+
+An unrecognized sentence is a legal no-op, not a failed JSON request: it is
+recorded once with the native outcome and is not retried or mislabeled as a
+parser rejection. Likewise a failed purchase is a resolved legal submission.
+Outcome and teacher-quality filtering are separate from request acceptance;
+receipt admission alone does not establish a useful strategy or learning.
+
+To exercise the complete production server/player path, compile the ordinary
+game and player, then run:
+
+```sh
+python3 tools/test_native_capture.py bin/cogmud bin/cogmud-player /path/to/retained-evidence
+```
+
+The destination must be new. This retains six complete standard/honest-town
+games with capture on/off replay and outcome parity, resolution-order joins,
+retries, fallback, normalization, privacy, legal no-ops, missing usage, and
+credential-free fallback. The provider is synthetic system-test evidence;
+real-model receipt admission and Qwen learning require separate measurements.
+Scenario families group the actual seeded world across variants and wording.
+
+
 The exporter plays ten complete native town episodes per certified
 variant. It records each seat's exact hosted system and user prompts,
 plus English sentences accepted by the production parser. Every seat

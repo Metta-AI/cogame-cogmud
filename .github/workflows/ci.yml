@@ -161,6 +161,13 @@ jobs:
       - name: Check complete prompt variants
         run: python3 tools/test_prompt_variants.py /tmp/cogmud-train-bridge
 
+      - name: Check complete native model capture and replay parity
+        run: |
+          nim c --hints:off -d:release --path:src -o:/tmp/cogmud src/cogmud.nim
+          nim c --hints:off -d:release --path:src -o:/tmp/cogmud-player src/cogmud_player.nim
+          python3 tools/test_native_capture.py /tmp/cogmud /tmp/cogmud-player \
+            "${RUNNER_TEMP}/cogmud-native-capture-${GITHUB_RUN_ID}"
+
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs
   # end to end in raw docker with the certification fixture's seat mix.
@@ -217,7 +224,7 @@ jobs:
   # container (Dockerfile.replay-viewer) because the runner has no emcc.
   # ---------------------------------------------------------------------
   wasm-viewer:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     # The bundle is EXECUTED here, not merely built, and it is executed against
     # the replay docker-smoke just produced -- hence the dependency.
