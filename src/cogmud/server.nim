@@ -29,7 +29,8 @@ import
   mummy/routers,
   llm,
   prompts,
-  sim
+  sim,
+  training
 
 const ReplayVersion = 1
 
@@ -38,6 +39,7 @@ type
     config: GameConfig
     selection: PromptSelection
     sim: Sim
+    trajectory: DecisionTrajectory
     prompts: seq[string]
     scripted: seq[ScriptKind]
     playerSockets: Table[int, WebSocket]
@@ -162,6 +164,7 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     grace = state.config.shutdownGraceSeconds
     results = state.sim.resultsJson()
     replayData = state.replayPayload(results)
+    state.trajectory.finishNativeTrajectory(results)
 
     ## Send final frames to players BEFORE writing artifacts: the hosted worker
     ## tears player pods down as soon as results.json exists, and writing first
@@ -289,9 +292,15 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (Claude, ONE parallel batch for the turn) runs outside
       ## the lock on a snapshot; only this thread mutates the sim, so the
       ## snapshot cannot go stale.
+      # Every private view precedes every submission. The sixth submission
+      # resolves all six in class/initiative order, which differs from seats.
+      var captureViews = newSeq[JsonNode](Seats)
+      if not state.trajectory.isNil:
+        for seat in seats: captureViews[seat] = simCopy.playerStateJson(seat)
       let decisions = client.decideAll(state.selection, simCopy, seats, prompts, scripted)
 
       withLock stateLock:
+        let firstEvent = state.sim.events.len
         for index, seat in seats:
           let decision = decisions[index]
           ## True for a baseline seat, for a whole episode with no
@@ -315,6 +324,15 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
                 true)
             except CogmudError:
               discard
+        if not state.trajectory.isNil:
+          for eventIndex in firstEvent ..< state.sim.events.len:
+            let applied = state.sim.events[eventIndex]
+            if applied.kind != evAct: continue
+            let seat = applied.seat
+            state.trajectory.recordAppliedDecision(eventIndex, seat,
+              config.players[seat].name, captureViews[seat], applied.executedReply(),
+              applied.scripted, scripted[seat] != skNone, client.nativeAttempts[seat],
+              state.selection)
         state.broadcastLocked()
 
       ## Pace between turns so spectators can read the town.
@@ -525,6 +543,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.selection = promptSelection(parseJson(
     if runtimeConfig.config.len > 0: runtimeConfig.config else: "{}"))
   state.sim = initSim(config)
+  state.trajectory = initNativeTrajectory(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
   runtimeConfigGlobal = runtimeConfig
