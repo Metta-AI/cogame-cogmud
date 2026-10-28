@@ -187,6 +187,11 @@ def run(game, player, output, variant, capture, model_enabled=True):
                 elif turn == 3:
                     assert row["action_status"] == "rejected" and row["selected_attempt_id"] is None
                     assert not attempts[0]["accepted"]
+                elif turn == 6:
+                    # Empty notes retain the existing memory in the engine.
+                    # Preserve the reply, but exclude this unequal action join.
+                    assert row["action_status"] == "rejected" and row["selected_attempt_id"] is None
+                    assert attempts[-1]["rejection_reason"] == "native engine normalized the proposal"
                 else:
                     assert row["action_status"] == "accepted"
                     assert row["selected_attempt_id"] == attempts[-1]["attempt_id"]
